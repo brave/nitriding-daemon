@@ -18,24 +18,24 @@ const (
 )
 
 var (
-	errMethodNotPOST     = "only HTTP POST requests are allowed"
+	errMethodNotGET      = "only HTTP GET requests are allowed"
 	errBadForm           = "failed to parse POST form data"
-	errNoNonce           = "could not find nonce in POST form data"
+	errNoNonce           = "could not find nonce in URL query parameters"
 	errBadNonceFormat    = fmt.Sprintf("unexpected nonce format; must be %d-digit hex string", nonceLen)
 	errFailedAttestation = "failed to obtain attestation document from hypervisor"
 	nonceRegExp          = fmt.Sprintf("[a-f0-9]{%d}", nonceLen)
 )
 
-// GetAttestationHandler TODO
+// GetAttestationHandler takes as input a SHA-256 hash over an HTTPS
+// certificate and returns a HandlerFunc.  This HandlerFunc expects a nonce in
+// the URL query parameters and subsequently asks its hypervisor for an
+// attestation document that contains both the nonce and the certificate hash.
+// The resulting Base64-encoded attestation document is then returned to the
+// requester.
 func GetAttestationHandler(certHash [32]byte) http.HandlerFunc {
-
-	// AttestationHandler takes as input a nonce and asks the hypervisor to create
-	// an attestation document that contains the given nonce and our HTTPS
-	// certificate's SHA-256 hash.  The resulting Base64-encoded attestation
-	// document is returned to the client.
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, errMethodNotPOST, http.StatusBadRequest)
+		if r.Method != http.MethodGet {
+			http.Error(w, errMethodNotGET, http.StatusMethodNotAllowed)
 			return
 		}
 		if err := r.ParseForm(); err != nil {
@@ -43,7 +43,7 @@ func GetAttestationHandler(certHash [32]byte) http.HandlerFunc {
 			return
 		}
 
-		nonce := r.FormValue("nonce")
+		nonce := r.URL.Query().Get("nonce")
 		if nonce == "" {
 			http.Error(w, errNoNonce, http.StatusBadRequest)
 			return
