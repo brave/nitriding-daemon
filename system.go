@@ -12,11 +12,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const (
+	seedDevice = "/dev/random"
+	seedSize   = 2048
+)
+
 // SeedEntropyPool obtains cryptographically secure random bytes from the
-// Nitro's NSM and uses them to initialize the given device, e.g. /dev/random.
-// If we don't do that, our system we start with no entropy, which means that
-// calls to /dev/(u)random will block.
-func SeedEntropyPool(device string, size int) error {
+// Nitro's NSM and uses them to initialize seedDevice with seedSize bytes.  If
+// we don't do that, our system is going to start with no entropy, which means
+// that calls to /dev/(u)random will block.
+func SeedEntropyPool() error {
 	s, err := nsm.OpenDefaultSession()
 	if err != nil {
 		return err
@@ -25,7 +30,7 @@ func SeedEntropyPool(device string, size int) error {
 		_ = s.Close()
 	}()
 
-	fd, err := os.OpenFile(device, os.O_WRONLY, os.ModePerm)
+	fd, err := os.OpenFile(seedDevice, os.O_WRONLY, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -34,7 +39,7 @@ func SeedEntropyPool(device string, size int) error {
 	}()
 
 	var written int
-	for totalWritten := 0; totalWritten < size; {
+	for totalWritten := 0; totalWritten < seedSize; {
 		// We ignore the error because of a bug that will return an error
 		// despite having obtained an attestation document:
 		// https://github.com/hf/nsm/issues/2
