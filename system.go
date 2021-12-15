@@ -17,11 +17,11 @@ const (
 	seedSize   = 2048
 )
 
-// SeedEntropyPool obtains cryptographically secure random bytes from the
+// seedEntropyPool obtains cryptographically secure random bytes from the
 // Nitro's NSM and uses them to initialize seedDevice with seedSize bytes.  If
 // we don't do that, our system is going to start with no entropy, which means
 // that calls to /dev/(u)random will block.
-func SeedEntropyPool() error {
+func seedEntropyPool() error {
 	s, err := nsm.OpenDefaultSession()
 	if err != nil {
 		return err
@@ -74,11 +74,11 @@ func SeedEntropyPool() error {
 	return nil
 }
 
-// AssignLoAddr assigns an IP address to the loopback interface, which is
+// assignLoAddr assigns an IP address to the loopback interface, which is
 // necessary because Nitro enclaves don't do that out-of-the-box.  We need the
 // loopback interface because we run a simple TCP proxy that listens on
 // 127.0.0.1:1080 and converts AF_INET to AF_VSOCK.
-func AssignLoAddr() error {
+func assignLoAddr() error {
 	addrStr := "127.0.0.1/8"
 	l, err := tenus.NewLinkFrom("lo")
 	if err != nil {
