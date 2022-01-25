@@ -73,10 +73,6 @@ func NewEnclave(cfg *Config) *Enclave {
 func (e *Enclave) Start() error {
 	var err error
 	errPrefix := "failed to start Nitro Enclave"
-	if err = seedEntropyPool(); err != nil {
-		return fmt.Errorf("%s: %v", errPrefix, err)
-	}
-	e.log("Seeded system entropy pool.")
 	if err = assignLoAddr(); err != nil {
 		return fmt.Errorf("%s: %v", errPrefix, err)
 	}
