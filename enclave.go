@@ -113,6 +113,7 @@ func (e *Enclave) Start() error {
 
 func (e *Enclave) log(format string, d ...interface{}) {
 	if e.cfg.Debug {
+		log.Print("Enclave: ")
 		log.Printf(format, d...)
 	}
 }

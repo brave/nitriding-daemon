@@ -79,7 +79,7 @@ func attest(nonce, userData, publicKey []byte) ([]byte, error) {
 	}
 	defer func() {
 		if err = s.Close(); err != nil {
-			log.Printf("Failed to close default NSM session: %s", err)
+			log.Printf("Attestation: Failed to close default NSM session: %s", err)
 		}
 	}()
 
