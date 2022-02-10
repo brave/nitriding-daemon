@@ -73,10 +73,17 @@ func NewEnclave(cfg *Config) *Enclave {
 func (e *Enclave) Start() error {
 	var err error
 	errPrefix := "failed to start Nitro Enclave"
-	if err = assignLoAddr(); err != nil {
-		return fmt.Errorf("%s: %v", errPrefix, err)
+
+	inEnclave, err := InEnclave()
+	if err != nil {
+		return fmt.Errorf("%s: couldn't determine if we're in enclave: %v", errPrefix, err)
 	}
-	e.log("Assigned address to lo interface.")
+	if inEnclave {
+		if err = assignLoAddr(); err != nil {
+			return fmt.Errorf("%s: failed to assign loopback address: %v", errPrefix, err)
+		}
+		e.log("Assigned address to lo interface.")
+	}
 
 	// Get an HTTPS certificate.
 	if e.cfg.UseACME {
@@ -85,29 +92,45 @@ func (e *Enclave) Start() error {
 		err = e.genSelfSignedCert()
 	}
 	if err != nil {
-		return fmt.Errorf("%s: %v", errPrefix, err)
+		return fmt.Errorf("%s: failed to create certificate: %v", errPrefix, err)
 	}
 	e.router.Get("/attestation", getAttestationHandler(e.certFpr))
 
 	// Tell Go's HTTP library to use SOCKS proxy for both HTTP and HTTPS.
 	if err := os.Setenv("HTTP_PROXY", e.cfg.SOCKSProxy); err != nil {
-		return fmt.Errorf("%s: %v", errPrefix, err)
+		return fmt.Errorf("%s: failed to set env var: %v", errPrefix, err)
 	}
 	if err := os.Setenv("HTTPS_PROXY", e.cfg.SOCKSProxy); err != nil {
-		return fmt.Errorf("%s: %v", errPrefix, err)
+		return fmt.Errorf("%s: failed to set env var: %v", errPrefix, err)
 	}
 
-	// Finally, start the Web server, using a vsock-enabled listener.
 	e.log("Starting Web server on port %s.", e.httpSrv.Addr)
 	var l net.Listener
-	l, err = vsock.Listen(uint32(e.cfg.Port))
+	inEnclave, err = InEnclave()
 	if err != nil {
-		return fmt.Errorf("%s: %v", errPrefix, err)
+		return fmt.Errorf("%s: couldn't determine if we're in enclave: %v", errPrefix, err)
+	}
+
+	// Finally, start the Web server.  If we're inside an enclave, we use a
+	// vsock-enabled listener, otherwise a simple tcp listener.
+	if inEnclave {
+		l, err = vsock.Listen(uint32(e.cfg.Port))
+		if err != nil {
+			return fmt.Errorf("%s: failed to create vsock listener: %v", errPrefix, err)
+		}
+		defer func() {
+			_ = l.Close()
+		}()
+
+		return e.httpSrv.ServeTLS(l, "", "")
+	}
+	l, err = net.Listen("tcp", e.httpSrv.Addr)
+	if err != nil {
+		return fmt.Errorf("%s: failed to create tcp listener: %v", errPrefix, err)
 	}
 	defer func() {
 		_ = l.Close()
 	}()
-
 	return e.httpSrv.ServeTLS(l, "", "")
 }
 
@@ -207,13 +230,26 @@ func (e *Enclave) setupAcme() error {
 	go func() {
 		// Let's Encrypt's HTTP-01 challenge requires a listener on port 80:
 		// https://letsencrypt.org/docs/challenge-types/#http-01-challenge
-		l, err := vsock.Listen(uint32(80))
+		var l net.Listener
+		inEnclave, err := InEnclave()
 		if err != nil {
-			log.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
+			log.Fatalf("Couldn't determine if we're in enclave: %s", err)
 		}
-		defer func() {
-			_ = l.Close()
-		}()
+
+		if inEnclave {
+			l, err = vsock.Listen(uint32(80))
+			if err != nil {
+				log.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
+			}
+			defer func() {
+				_ = l.Close()
+			}()
+		} else {
+			l, err = net.Listen("tcp", ":80")
+			if err != nil {
+				log.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
+			}
+		}
 
 		e.log("Starting autocert listener.")
 		_ = http.Serve(l, certManager.HTTPHandler(nil))
