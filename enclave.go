@@ -274,7 +274,9 @@ func (e *Enclave) setupAcme() error {
 				break
 			}
 		}
-		e.setCertFingerprint(rawData)
+		if err := e.setCertFingerprint(rawData); err != nil {
+			log.Fatalf("Failed to set certificate fingerprint: %s", err)
+		}
 	}()
 	return nil
 }

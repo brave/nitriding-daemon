@@ -29,10 +29,7 @@ func assignLoAddr() error {
 	if err = l.SetLinkIp(addr, network); err != nil {
 		return err
 	}
-	if err = l.SetLinkUp(); err != nil {
-		return err
-	}
-	return nil
+	return l.SetLinkUp()
 }
 
 // InEnclave returns true if we are running in a Nitro enclave and false
