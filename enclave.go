@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/mdlayher/vsock"
 
+	"github.com/brave-experiments/nitro-enclave-utils/randseed"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -78,7 +79,7 @@ func (e *Enclave) Start() error {
 	var err error
 	errPrefix := "failed to start Nitro Enclave"
 
-	inEnclave, err := InEnclave()
+	inEnclave, err := randseed.InEnclave()
 	if err != nil {
 		return fmt.Errorf("%s: couldn't determine if we're in enclave: %v", errPrefix, err)
 	}
@@ -112,7 +113,7 @@ func (e *Enclave) Start() error {
 
 	elog.Printf("Starting Web server on port %s.", e.httpSrv.Addr)
 	var l net.Listener
-	inEnclave, err = InEnclave()
+	inEnclave, err = randseed.InEnclave()
 	if err != nil {
 		return fmt.Errorf("%s: couldn't determine if we're in enclave: %v", errPrefix, err)
 	}
@@ -230,7 +231,7 @@ func (e *Enclave) setupAcme() error {
 		// Let's Encrypt's HTTP-01 challenge requires a listener on port 80:
 		// https://letsencrypt.org/docs/challenge-types/#http-01-challenge
 		var l net.Listener
-		inEnclave, err := InEnclave()
+		inEnclave, err := randseed.InEnclave()
 		if err != nil {
 			elog.Fatalf("Couldn't determine if we're in enclave: %s", err)
 		}

@@ -1,6 +1,7 @@
 package randseed
 
 import (
+	"errors"
 	"log"
 	"os"
 	"unsafe"
@@ -9,13 +10,12 @@ import (
 	"github.com/hf/nsm/request"
 
 	"golang.org/x/sys/unix"
-
-	utils "github.com/brave-experiments/nitro-enclave-utils"
 )
 
 const (
 	entropySeedDevice = "/dev/random"
 	entropySeedSize   = 2048
+	nsmDevPath        = "/dev/nsm"
 )
 
 // init obtains cryptographically secure random bytes from the Nitro Secure
@@ -24,7 +24,7 @@ const (
 // entropy, which means that calls to /dev/(u)random will block.
 func init() {
 	// Abort if we're not in an enclave, or if we can't tell if we are.
-	inEnclave, err := utils.InEnclave()
+	inEnclave, err := InEnclave()
 	if err != nil || !inEnclave {
 		return
 	}
@@ -49,12 +49,9 @@ func init() {
 
 	var written int
 	for totalWritten := 0; totalWritten < entropySeedSize; {
-		// We ignore the error because of a bug that will return an error
-		// despite having obtained an attestation document:
-		// https://github.com/hf/nsm/issues/2
-		res, _ := s.Send(&request.GetRandom{})
-		if res.Error != "" {
-			log.Fatal(res.Error)
+		res, err := s.Send(&request.GetRandom{})
+		if err != nil {
+			log.Fatalf("Failed to communicate with hypervisor: %s", err)
 		}
 		if res.GetRandom == nil {
 			log.Fatal("no GetRandom part in NSM's response")
@@ -82,4 +79,16 @@ func init() {
 	}
 
 	log.Println("Initialized the system's entropy pool.")
+}
+
+// InEnclave returns true if we are running in a Nitro enclave and false
+// otherwise.  If something goes wrong during the check, an error is returned.
+func InEnclave() (bool, error) {
+	if _, err := os.Stat(nsmDevPath); err == nil {
+		return true, nil
+	} else if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else {
+		return false, err
+	}
 }

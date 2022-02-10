@@ -1,15 +1,9 @@
 package enclaveutils
 
 import (
-	"errors"
 	"net"
-	"os"
 
 	"github.com/milosgajdos/tenus"
-)
-
-const (
-	nsmDevPath = "/dev/nsm"
 )
 
 // assignLoAddr assigns an IP address to the loopback interface, which is
@@ -30,16 +24,4 @@ func assignLoAddr() error {
 		return err
 	}
 	return l.SetLinkUp()
-}
-
-// InEnclave returns true if we are running in a Nitro enclave and false
-// otherwise.  If something goes wrong during the check, an error is returned.
-func InEnclave() (bool, error) {
-	if _, err := os.Stat(nsmDevPath); err == nil {
-		return true, nil
-	} else if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	} else {
-		return false, err
-	}
 }
