@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"regexp"
 
@@ -79,7 +78,7 @@ func attest(nonce, userData, publicKey []byte) ([]byte, error) {
 	}
 	defer func() {
 		if err = s.Close(); err != nil {
-			log.Printf("Attestation: Failed to close default NSM session: %s", err)
+			elog.Printf("Attestation: Failed to close default NSM session: %s", err)
 		}
 	}()
 

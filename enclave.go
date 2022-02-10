@@ -32,6 +32,10 @@ const (
 	certificateValidity = time.Hour * 24 * 356
 )
 
+var (
+	elog = log.New(os.Stderr, "nitro-enclave-utils: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
+)
+
 // Enclave represents a service running inside an AWS Nitro Enclave.
 type Enclave struct {
 	cfg     *Config
@@ -82,7 +86,7 @@ func (e *Enclave) Start() error {
 		if err = assignLoAddr(); err != nil {
 			return fmt.Errorf("%s: failed to assign loopback address: %v", errPrefix, err)
 		}
-		e.log("Assigned address to lo interface.")
+		elog.Println("Assigned address to lo interface.")
 	}
 
 	// Get an HTTPS certificate.
@@ -106,7 +110,7 @@ func (e *Enclave) Start() error {
 		return fmt.Errorf("%s: failed to set env var: %v", errPrefix, err)
 	}
 
-	e.log("Starting Web server on port %s.", e.httpSrv.Addr)
+	elog.Printf("Starting Web server on port %s.", e.httpSrv.Addr)
 	var l net.Listener
 	inEnclave, err = InEnclave()
 	if err != nil {
@@ -136,13 +140,6 @@ func (e *Enclave) Start() error {
 	return e.httpSrv.ServeTLS(l, "", "")
 }
 
-func (e *Enclave) log(format string, d ...interface{}) {
-	if e.cfg.Debug {
-		log.Print("Enclave: ")
-		log.Printf(format, d...)
-	}
-}
-
 // genSelfSignedCert creates and returns a self-signed TLS certificate based on
 // the given FQDN.  Some of the code below was taken from:
 // https://eli.thegreenplace.net/2021/go-https-servers-with-tls/
@@ -151,14 +148,14 @@ func (e *Enclave) genSelfSignedCert() error {
 	if err != nil {
 		return err
 	}
-	e.log("Generated private key for self-signed certificate.")
+	elog.Println("Generated private key for self-signed certificate.")
 
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
 		return err
 	}
-	e.log("Generated serial number for self-signed certificate.")
+	elog.Println("Generated serial number for self-signed certificate.")
 
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
@@ -177,7 +174,7 @@ func (e *Enclave) genSelfSignedCert() error {
 	if err != nil {
 		return err
 	}
-	e.log("Created certificate from template.")
+	elog.Println("Created certificate from template.")
 
 	pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
 	if pemCert == nil {
@@ -191,11 +188,11 @@ func (e *Enclave) genSelfSignedCert() error {
 
 	privBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {
-		log.Fatalf("Unable to marshal private key: %v", err)
+		elog.Fatalf("Unable to marshal private key: %v", err)
 	}
 	pemKey := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
 	if pemKey == nil {
-		log.Fatal("Failed to encode key to PEM.")
+		elog.Fatal("Failed to encode key to PEM.")
 	}
 
 	cert, err := tls.X509KeyPair(pemCert, pemKey)
@@ -218,7 +215,7 @@ func (e *Enclave) genSelfSignedCert() error {
 func (e *Enclave) setupAcme() error {
 	var err error
 
-	e.log("ACME hostname set to %s.", e.cfg.FQDN)
+	elog.Printf("ACME hostname set to %s.", e.cfg.FQDN)
 	var cache autocert.Cache
 	if err = os.MkdirAll(acmeCertCacheDir, 0700); err != nil {
 		return fmt.Errorf("Failed to create cache directory: %v", err)
@@ -235,13 +232,13 @@ func (e *Enclave) setupAcme() error {
 		var l net.Listener
 		inEnclave, err := InEnclave()
 		if err != nil {
-			log.Fatalf("Couldn't determine if we're in enclave: %s", err)
+			elog.Fatalf("Couldn't determine if we're in enclave: %s", err)
 		}
 
 		if inEnclave {
 			l, err = vsock.Listen(uint32(80))
 			if err != nil {
-				log.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
+				elog.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
 			}
 			defer func() {
 				_ = l.Close()
@@ -249,11 +246,11 @@ func (e *Enclave) setupAcme() error {
 		} else {
 			l, err = net.Listen("tcp", ":80")
 			if err != nil {
-				log.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
+				elog.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
 			}
 		}
 
-		e.log("Starting autocert listener.")
+		elog.Print("Starting autocert listener.")
 		_ = http.Serve(l, certManager.HTTPHandler(nil))
 	}()
 	e.httpSrv.TLSConfig = &tls.Config{GetCertificate: certManager.GetCertificate}
@@ -270,12 +267,12 @@ func (e *Enclave) setupAcme() error {
 			if err != nil {
 				time.Sleep(5 * time.Second)
 			} else {
-				e.log("Got certificates from cache.  Proceeding with start.")
+				elog.Print("Got certificates from cache.  Proceeding with start.")
 				break
 			}
 		}
 		if err := e.setCertFingerprint(rawData); err != nil {
-			log.Fatalf("Failed to set certificate fingerprint: %s", err)
+			elog.Fatalf("Failed to set certificate fingerprint: %s", err)
 		}
 	}()
 	return nil
@@ -299,7 +296,7 @@ func (e *Enclave) setCertFingerprint(rawData []byte) error {
 			}
 			if !cert.IsCA {
 				e.certFpr = sha256.Sum256(cert.Raw)
-				e.log("Set SHA-256 fingerprint of server's certificate to: %x", e.certFpr[:])
+				elog.Printf("Set SHA-256 fingerprint of server's certificate to: %x", e.certFpr[:])
 				return nil
 			}
 		}

@@ -6,13 +6,12 @@ package enclaveutils
 // AF_VSOCK.
 
 import (
-	"log"
 	"net"
 
 	"github.com/mdlayher/vsock"
 )
 
-// According to AWS docs, the CID (analogous to an IP address) of the
+// According to AWS docs, the CID (anaelogous to an IP address) of the
 // parent instance is always 3:
 // https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-concepts.html
 const parentCID = 3
@@ -30,27 +29,27 @@ func (p *VProxy) Start(done chan bool) {
 	// Bind to TCP address.
 	ln, err := net.Listen("tcp", p.laddr.String())
 	if err != nil {
-		log.Fatalf("VProxy: Failed to bind to %s: %s", p.laddr.String(), err)
+		elog.Fatalf("Failed to bind to %s: %s", p.laddr.String(), err)
 	}
 	done <- true // Signal to caller that we're ready to accept connections.
 
 	for {
 
-		log.Printf("VProxy: Waiting for new outgoing TCP connection.")
+		elog.Println("Waiting for new outgoing TCP connection.")
 		lconn, err := ln.Accept()
 		if err != nil {
-			log.Printf("VProxy: Failed to accept proxy connection: %s", err)
+			elog.Printf("Failed to accept proxy connection: %s", err)
 			continue
 		}
-		log.Printf("VProxy: Accepted new outgoing TCP connection.")
+		elog.Println("Accepted new outgoing TCP connection.")
 
 		// Establish connection with SOCKS proxy via our vsock interface.
 		rconn, err := vsock.Dial(p.raddr.ContextID, p.raddr.Port)
 		if err != nil {
-			log.Printf("VProxy: Failed to establish connection to SOCKS proxy: %s", err)
+			elog.Printf("Failed to establish connection to SOCKS proxy: %s", err)
 			continue
 		}
-		log.Println("VProxy: Established connection with SOCKS proxy over vsock.")
+		elog.Println("Established connection with SOCKS proxy over vsock.")
 
 		// Now pipe data from left to right and vice versa.
 		go p.pipe(lconn, rconn)
@@ -62,24 +61,24 @@ func (p *VProxy) Start(done chan bool) {
 func (p *VProxy) pipe(src, dst net.Conn) {
 	defer func() {
 		if err := src.Close(); err != nil {
-			log.Printf("VProxy: Failed to close connection: %s", err)
+			elog.Printf("Failed to close connection: %s", err)
 		}
 	}()
 	buf := make([]byte, 0xffff)
 	for {
 		n, err := src.Read(buf)
 		if err != nil {
-			log.Printf("VProxy: Failed to read from src connection: %s", err)
+			elog.Printf("Failed to read from src connection: %s", err)
 			return
 		}
 		b := buf[:n]
 		n, err = dst.Write(b)
 		if err != nil {
-			log.Printf("VProxy: Failed to write to dst connection: %s", err)
+			elog.Printf("Failed to write to dst connection: %s", err)
 			return
 		}
 		if n != len(b) {
-			log.Printf("VProxy: Only wrote %d out of %d bytes.", n, len(b))
+			elog.Printf("Only wrote %d out of %d bytes.", n, len(b))
 			return
 		}
 	}
