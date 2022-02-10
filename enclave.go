@@ -94,7 +94,9 @@ func (e *Enclave) Start() error {
 	if err != nil {
 		return fmt.Errorf("%s: failed to create certificate: %v", errPrefix, err)
 	}
-	e.router.Get("/attestation", getAttestationHandler(e.certFpr))
+	if inEnclave {
+		e.router.Get("/attestation", getAttestationHandler(e.certFpr))
+	}
 
 	// Tell Go's HTTP library to use SOCKS proxy for both HTTP and HTTPS.
 	if err := os.Setenv("HTTP_PROXY", e.cfg.SOCKSProxy); err != nil {
