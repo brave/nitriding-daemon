@@ -1,7 +1,6 @@
 package randseed
 
 import (
-	"errors"
 	"log"
 	"os"
 	"unsafe"
@@ -10,6 +9,8 @@ import (
 	"github.com/hf/nsm/request"
 
 	"golang.org/x/sys/unix"
+
+	utils "github.com/brave-experiments/nitro-enclave-utils"
 )
 
 const (
@@ -22,9 +23,9 @@ const (
 // generator.  If we don't do that, our system is going to start with no
 // entropy, which means that calls to /dev/(u)random will block.
 func init() {
-	// Abort if there's no /dev/nsm; e.g., when running unit tests outside of a
-	// Nitro Enclave.
-	if _, err := os.Stat("/dev/nsm"); errors.Is(err, os.ErrNotExist) {
+	// Abort if we're not in an enclave, or if we can't tell if we are.
+	inEnclave, err := utils.InEnclave()
+	if err != nil || !inEnclave {
 		return
 	}
 
