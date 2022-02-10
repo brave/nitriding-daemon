@@ -44,7 +44,7 @@ func (p *VProxy) Start(done chan bool) {
 		elog.Println("Accepted new outgoing TCP connection.")
 
 		// Establish connection with SOCKS proxy via our vsock interface.
-		rconn, err := vsock.Dial(p.raddr.ContextID, p.raddr.Port)
+		rconn, err := vsock.Dial(p.raddr.ContextID, p.raddr.Port, nil)
 		if err != nil {
 			elog.Printf("Failed to establish connection to SOCKS proxy: %s", err)
 			continue

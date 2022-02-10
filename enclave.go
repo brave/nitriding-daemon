@@ -120,7 +120,7 @@ func (e *Enclave) Start() error {
 	// Finally, start the Web server.  If we're inside an enclave, we use a
 	// vsock-enabled listener, otherwise a simple tcp listener.
 	if inEnclave {
-		l, err = vsock.Listen(uint32(e.cfg.Port))
+		l, err = vsock.Listen(uint32(e.cfg.Port), nil)
 		if err != nil {
 			return fmt.Errorf("%s: failed to create vsock listener: %v", errPrefix, err)
 		}
@@ -236,7 +236,7 @@ func (e *Enclave) setupAcme() error {
 		}
 
 		if inEnclave {
-			l, err = vsock.Listen(uint32(80))
+			l, err = vsock.Listen(uint32(80), nil)
 			if err != nil {
 				elog.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
 			}
