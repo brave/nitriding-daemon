@@ -1,3 +1,5 @@
+// Package enclaveutils implements a lightweight framework to build networked
+// Go applications that run in AWS Nitro Enclaves.
 package enclaveutils
 
 import (
