@@ -18,6 +18,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/mdlayher/vsock"
 
 	"github.com/brave-experiments/nitro-enclave-utils/randseed"
+	"github.com/brave-experiments/viproxy"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -33,6 +35,13 @@ const (
 	acmeCertCacheDir    = "cert-cache"
 	certificateOrg      = "Brave Software"
 	certificateValidity = time.Hour * 24 * 356
+	// parentCID determines the CID (analogous to an IP address) of the parent
+	// EC2 instance.  According to the AWS docs, it is always 3:
+	// https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-concepts.html
+	parentCID = 3
+	// parentProxyPort determines the TCP port of the SOCKS proxy that's
+	// running on the parent EC2 instance.
+	parentProxyPort = 1080
 )
 
 var (
@@ -118,6 +127,25 @@ func (e *Enclave) Start() error {
 	}
 	if err := os.Setenv("HTTPS_PROXY", e.cfg.SOCKSProxy); err != nil {
 		return fmt.Errorf("%s: failed to set env var: %v", errPrefix, err)
+	}
+
+	// Set up AF_INET to AF_VSOCK proxy to facilitate the use of the SOCKS
+	// proxy.
+	u, err := url.Parse(e.cfg.SOCKSProxy)
+	if err != nil {
+		return fmt.Errorf("failed to parse SOCKSProxy from config: %s", err)
+	}
+	inAddr, err := net.ResolveTCPAddr("tcp", u.Host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve SOCKSProxy from config: %s", err)
+	}
+	tuple := &viproxy.Tuple{
+		InAddr:  inAddr,
+		OutAddr: &vsock.Addr{ContextID: uint32(parentCID), Port: uint32(parentProxyPort)},
+	}
+	proxy := viproxy.NewVIProxy([]*viproxy.Tuple{tuple})
+	if err := proxy.Start(); err != nil {
+		return fmt.Errorf("failed to start VIProxy: %s", err)
 	}
 
 	elog.Printf("Starting Web server on port %s.", e.httpSrv.Addr)
