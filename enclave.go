@@ -54,6 +54,8 @@ type Config struct {
 	Port       int
 	UseACME    bool
 	Debug      bool
+	FdCur      uint64
+	FdMax      uint64
 }
 
 // NewEnclave creates and returns a new enclave with the given config.
@@ -90,6 +92,11 @@ func (e *Enclave) Start() error {
 			return fmt.Errorf("%s: failed to assign loopback address: %v", errPrefix, err)
 		}
 		elog.Println("Assigned address to lo interface.")
+	}
+
+	// Set file descriptor limit.  There's no need to exit if this fails.
+	if err = setFdLimit(e.cfg.FdCur, e.cfg.FdMax); err != nil {
+		elog.Printf("Failed to set new file descriptor limit: %s", err)
 	}
 
 	// Get an HTTPS certificate.
