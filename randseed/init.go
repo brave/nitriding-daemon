@@ -1,7 +1,8 @@
+//go:build linux
+
 package randseed
 
 import (
-	"errors"
 	"log"
 	"os"
 	"unsafe"
@@ -15,7 +16,6 @@ import (
 const (
 	entropySeedDevice = "/dev/random"
 	entropySeedSize   = 2048
-	nsmDevPath        = "/dev/nsm"
 )
 
 // init obtains cryptographically secure random bytes from the Nitro Secure
@@ -79,16 +79,4 @@ func init() {
 	}
 
 	log.Println("Initialized the system's entropy pool.")
-}
-
-// InEnclave returns true if we are running in a Nitro enclave and false
-// otherwise.  If something goes wrong during the check, an error is returned.
-func InEnclave() (bool, error) {
-	if _, err := os.Stat(nsmDevPath); err == nil {
-		return true, nil
-	} else if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	} else {
-		return false, err
-	}
 }
