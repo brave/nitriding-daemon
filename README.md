@@ -14,20 +14,33 @@ Enclaves.  The package provides the following features:
 
 4. Start a proxy that transparently translates between IP and VSOCK.
 
-Use the following code to get started:
+Use the following "hello world" example to get started:
 
-    func main() {
-    	enclave := nitro.NewEnclave(
-    		&nitro.Config{
-    			SOCKSProxy: "socks5://127.0.0.1:1080",
-    			FQDN:       "example.com",
-    			Port:       80,
-    			Debug:      true,
-    			UseACME:    false,
-    		},
-    	)
-    	enclave.AddRoute(http.MethodGet, "/helloworld", helloWorldHandler())
-    	if err := enclave.Start(); err != nil {
-    		log.Fatalf("Enclave terminated: %v", err)
-    	}
-    }
+	package main
+
+	import (
+		"fmt"
+		"log"
+		"net/http"
+
+		nitro "github.com/brave-experiments/nitro-enclave-utils"
+	)
+
+	func helloWorldHandler(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "hello world")
+	}
+
+	func main() {
+		enclave := nitro.NewEnclave(
+			&nitro.Config{
+				FQDN:    "example.com",
+				Port:    8080,
+				UseACME: false,
+				Debug:   false,
+			},
+		)
+		enclave.AddRoute(http.MethodGet, "/hello-world", helloWorldHandler)
+		if err := enclave.Start(); err != nil {
+			log.Fatalf("Enclave terminated: %v", err)
+		}
+	}
