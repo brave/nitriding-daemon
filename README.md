@@ -1,6 +1,6 @@
-# Nitro Enclave Utils
+# Nitriding
 
-[![GoDoc](https://pkg.go.dev/badge/github.com/brave-experiments/nitro-enclave-utils?utm_source=godoc)](https://pkg.go.dev/github.com/brave-experiments/nitro-enclave-utils)
+[![GoDoc](https://pkg.go.dev/badge/github.com/brave-experiments/nitriding?utm_source=godoc)](https://pkg.go.dev/github.com/brave-experiments/nitriding)
 
 This package helps with building networked Go applications on top of AWS Nitro
 Enclaves.  The package provides the following features:
@@ -23,7 +23,7 @@ Use the following "hello world" example to get started:
 		"log"
 		"net/http"
 
-		nitro "github.com/brave-experiments/nitro-enclave-utils"
+		"github.com/brave-experiments/nitriding"
 	)
 
 	func helloWorldHandler(w http.ResponseWriter, r *http.Request) {
@@ -31,8 +31,8 @@ Use the following "hello world" example to get started:
 	}
 
 	func main() {
-		enclave := nitro.NewEnclave(
-			&nitro.Config{
+		enclave := nitriding.NewEnclave(
+			&nitriding.Config{
 				FQDN:    "example.com",
 				Port:    8080,
 				UseACME: false,

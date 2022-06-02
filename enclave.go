@@ -1,6 +1,6 @@
-// Package enclaveutils implements a lightweight framework to build networked
+// Package nitriding implements a lightweight framework to build networked
 // Go applications that run in AWS Nitro Enclaves.
-package enclaveutils
+package nitriding
 
 import (
 	"context"
@@ -26,7 +26,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/mdlayher/vsock"
 
-	"github.com/brave-experiments/nitro-enclave-utils/randseed"
+	"github.com/brave-experiments/nitriding/randseed"
 	"github.com/brave-experiments/viproxy"
 	"golang.org/x/crypto/acme/autocert"
 )
@@ -45,7 +45,7 @@ const (
 )
 
 var (
-	elog = log.New(os.Stderr, "nitro-enclave-utils: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
+	elog = log.New(os.Stderr, "nitriding: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
 )
 
 // Enclave represents a service running inside an AWS Nitro Enclave.

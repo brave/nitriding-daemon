@@ -1,4 +1,4 @@
-module github.com/brave-experiments/nitro-enclave-utils
+module github.com/brave-experiments/nitriding
 
 go 1.17
 

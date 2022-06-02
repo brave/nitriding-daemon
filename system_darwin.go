@@ -1,3 +1,3 @@
-package enclaveutils
+package nitriding
 
 func assignLoAddr() error { return nil }
