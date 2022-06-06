@@ -65,6 +65,7 @@ type Config struct {
 	Debug      bool
 	FdCur      uint64
 	FdMax      uint64
+	AppURL     string
 }
 
 // NewEnclave creates and returns a new enclave with the given config.
@@ -120,6 +121,7 @@ func (e *Enclave) Start() error {
 	if inEnclave {
 		e.router.Get("/attestation", getAttestationHandler(e.certFpr))
 	}
+	e.router.Get("/", getIndexHandler(e.cfg))
 
 	// Tell Go's HTTP library to use SOCKS proxy for both HTTP and HTTPS.
 	if err := os.Setenv("HTTP_PROXY", e.cfg.SOCKSProxy); err != nil {
