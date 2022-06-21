@@ -13,16 +13,17 @@ import (
 )
 
 const (
-	nonceLen = 40 // The number of hex digits in a nonce.
+	nonceLen       = 20           // The size of a nonce in bytes.
+	nonceNumDigits = nonceLen * 2 // The number of hex digits in a nonce.
 )
 
 var (
 	errMethodNotGET      = "only HTTP GET requests are allowed"
 	errBadForm           = "failed to parse POST form data"
 	errNoNonce           = "could not find nonce in URL query parameters"
-	errBadNonceFormat    = fmt.Sprintf("unexpected nonce format; must be %d-digit hex string", nonceLen)
+	errBadNonceFormat    = fmt.Sprintf("unexpected nonce format; must be %d-digit hex string", nonceNumDigits)
 	errFailedAttestation = "failed to obtain attestation document from hypervisor"
-	nonceRegExp          = fmt.Sprintf("[a-f0-9]{%d}", nonceLen)
+	nonceRegExp          = fmt.Sprintf("[a-f0-9]{%d}", nonceNumDigits)
 )
 
 // getAttestationHandler takes as input a SHA-256 hash over an HTTPS
