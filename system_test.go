@@ -25,8 +25,8 @@ func TestSetFdLimit(t *testing.T) {
 	checkFdLimit(t, defaultFdCur, defaultFdMax)
 
 	// Check if custom values are set correctly.
-	if err = setFdLimit(1, 1); err != nil {
+	if err = setFdLimit(defaultFdCur-1, defaultFdMax-1); err != nil {
 		t.Fatalf("Failed to set file descriptor limit: %s", err)
 	}
-	checkFdLimit(t, 1, 1)
+	checkFdLimit(t, defaultFdCur-1, defaultFdMax-1)
 }
