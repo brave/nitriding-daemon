@@ -119,7 +119,7 @@ func (e *Enclave) Start() error {
 		return fmt.Errorf("%s: failed to create certificate: %v", errPrefix, err)
 	}
 	if inEnclave {
-		e.router.Get("/attestation", getAttestationHandler(e.certFpr))
+		e.router.Get("/attestation", getAttestationHandler(&e.certFpr))
 	}
 	e.router.Get("/", getIndexHandler(e.cfg))
 
