@@ -31,7 +31,7 @@ var (
 // attestation document that contains both the nonce and the certificate hash.
 // The resulting Base64-encoded attestation document is then returned to the
 // requester.
-func getAttestationHandler(certHash [32]byte) http.HandlerFunc {
+func getAttestationHandler(certHash *[32]byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, errMethodNotGET, http.StatusMethodNotAllowed)
