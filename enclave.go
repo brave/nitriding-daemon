@@ -385,8 +385,8 @@ func (e *Enclave) AddRoute(method, pattern string, handlerFn http.HandlerFunc) {
 // that the key material's underlying data structure must be marshallable to
 // JSON.
 //
-// This is only necessary if you intend to scale enclaves using Kubernetes.  If
-// you will only ever run a single enclave, ignore this function.
+// This is only necessary if you intend to scale enclaves horizontally.  If you
+// will only ever run a single enclave, ignore this function.
 func (e *Enclave) SetKeyMaterial(keyMaterial any) {
 	e.Lock()
 	defer e.Unlock()
