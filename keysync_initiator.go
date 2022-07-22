@@ -76,13 +76,14 @@ func requestNonce(addr string) (nonce, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
+	bufSize := base64.StdEncoding.EncodedLen(nonceLen)
+	bodyBuf := make([]byte, bufSize)
+	if _, err := io.ReadFull(resp.Body, bodyBuf); err != nil {
 		return nonce{}, fmt.Errorf("%s: %s", errStr, err)
 	}
 
 	// Decode the Base64-encoded nonce.
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(bodyBuf)))
 	if err != nil {
 		return nonce{}, fmt.Errorf("%s: %s", errStr, err)
 	}
