@@ -16,8 +16,8 @@ type cache struct {
 	TTL   time.Duration
 }
 
-// newCache creates and returns a new cache with the given expiry date for
-// cache items.
+// newCache creates and returns a new cache with the given lifetime for cache
+// items.
 func newCache(ttl time.Duration) *cache {
 	return &cache{
 		Items: make(map[string]time.Time),
