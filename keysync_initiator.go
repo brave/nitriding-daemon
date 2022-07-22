@@ -119,12 +119,13 @@ func requestAttDoc(addr string, ourAttDoc []byte) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
+	bufSize := base64.StdEncoding.EncodedLen(maxAttDocLen)
+	bodyBuf := make([]byte, bufSize)
+	if _, err := io.ReadFull(resp.Body, bodyBuf); err != nil {
 		return nil, fmt.Errorf("%s: %s", errStr, err)
 	}
 
-	theirAttDoc, err := base64.StdEncoding.DecodeString(string(body))
+	theirAttDoc, err := base64.StdEncoding.DecodeString(string(bodyBuf))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %s", errStr, err)
 	}
