@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -17,6 +17,7 @@ var (
 	errFailedNonce     = "failed to create nonce"
 	errNoBase64        = "failed to Base64-decode attestation document"
 	errFailedVerify    = "failed to verify attestation document"
+	errFailedRespBody  = "failed to read response body"
 	errFailedFindNonce = "could not find provided nonce"
 	errInvalidSbKeys   = "invalid secretbox key material"
 )
@@ -42,9 +43,10 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var ourNonce, theirNonce nonce
 
-		body, err := ioutil.ReadAll(r.Body)
+		maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(maxReadLen)))
 		if err != nil {
-			http.Error(w, "failed to read request body", http.StatusInternalServerError)
+			http.Error(w, errFailedRespBody, http.StatusInternalServerError)
 			return
 		}
 		theirRawAttDoc, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))

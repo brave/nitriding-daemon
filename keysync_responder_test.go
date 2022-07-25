@@ -94,3 +94,14 @@ func TestKeysHandler(t *testing.T) {
 
 	// Send an attestation document with a nonce and a secretbox key.
 }
+
+func TestKeysHandlerDoS(t *testing.T) {
+	var res *http.Response
+	enclave := NewEnclave(&Config{})
+
+	// Send more data than the handler should be willing to read.
+	maxSize := base64.StdEncoding.EncodedLen(maxAttDocLen)
+	body := make([]byte, maxSize+1)
+	res = queryHandler(getKeysHandler(enclave, time.Now), pathKeys, bytes.NewReader(body))
+	expect(t, res, http.StatusInternalServerError, errFailedRespBody)
+}
