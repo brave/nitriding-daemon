@@ -18,7 +18,7 @@ import (
 // RequestKeys asks a remote enclave to share its key material with us, which
 // is then written to the provided variable.
 //
-// This is only necessary if you intend to scale enclaves using Kubernetes.  If
+// This is only necessary if you intend to scale enclaves horizontally.  If
 // you will only ever run a single enclave, ignore this function.
 func RequestKeys(addr string, keyMaterial any) error {
 	errStr := "failed to request key material"
