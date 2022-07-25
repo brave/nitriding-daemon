@@ -1,6 +1,8 @@
 package nitriding
 
 import (
+	"bytes"
+	"io"
 	"syscall"
 	"testing"
 )
@@ -12,6 +14,26 @@ func checkFdLimit(t *testing.T, cur, max uint64) {
 	}
 	if rLimit.Cur != cur || rLimit.Max != max {
 		t.Fatal("Got unexpected file descriptor limits.")
+	}
+}
+
+func TestLimitReader(t *testing.T) {
+	bufContent := []byte("foobar")
+
+	// Hand the reader too much.
+	buf := bytes.NewReader(bufContent)
+	if _, err := io.ReadAll(newLimitReader(buf, len(bufContent))); err == nil {
+		t.Fatalf("Expected error %q but got none.", errTooMuchToRead)
+	}
+
+	// Hand the reader the maximum allowable amount.
+	buf = bytes.NewReader(bufContent)
+	ret, err := io.ReadAll(newLimitReader(buf, len(bufContent)+1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(ret, bufContent) {
+		t.Fatalf("Expected to read %q into buffer but got %q.", bufContent, ret)
 	}
 }
 

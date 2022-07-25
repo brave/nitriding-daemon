@@ -76,14 +76,14 @@ func requestNonce(addr string) (nonce, error) {
 	}
 	defer resp.Body.Close()
 
-	bufSize := base64.StdEncoding.EncodedLen(nonceLen)
-	bodyBuf := make([]byte, bufSize)
-	if _, err := io.ReadFull(resp.Body, bodyBuf); err != nil {
+	maxReadLen := base64.StdEncoding.EncodedLen(nonceLen)
+	body, err := io.ReadAll(newLimitReader(resp.Body, maxReadLen+1))
+	if err != nil {
 		return nonce{}, fmt.Errorf("%s: %s", errStr, err)
 	}
 
 	// Decode the Base64-encoded nonce.
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(bodyBuf)))
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))
 	if err != nil {
 		return nonce{}, fmt.Errorf("%s: %s", errStr, err)
 	}
@@ -119,13 +119,13 @@ func requestAttDoc(addr string, ourAttDoc []byte) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	bufSize := base64.StdEncoding.EncodedLen(maxAttDocLen)
-	bodyBuf := make([]byte, bufSize)
-	if _, err := io.ReadFull(resp.Body, bodyBuf); err != nil {
+	maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
+	body, err := io.ReadAll(newLimitReader(resp.Body, maxReadLen+1))
+	if err != nil {
 		return nil, fmt.Errorf("%s: %s", errStr, err)
 	}
 
-	theirAttDoc, err := base64.StdEncoding.DecodeString(string(bodyBuf))
+	theirAttDoc, err := base64.StdEncoding.DecodeString(string(body))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %s", errStr, err)
 	}

@@ -1,6 +1,7 @@
 package nitriding
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,19 @@ func TestRequestNonce(t *testing.T) {
 	}
 }
 
+func TestRequestNonceDoS(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nonce1 := nonce{}
+		nonce2 := nonce{}
+		fmt.Fprintf(w, "%s%s", nonce1.B64(), nonce2.B64())
+	}))
+	defer srv.Close()
+
+	if _, err := requestNonce(srv.URL); err == nil {
+		t.Fatal("Client code should have rejected long response body but didn't.")
+	}
+}
+
 func TestRequestAttDoc(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "foobar")
@@ -34,6 +48,19 @@ func TestRequestAttDoc(t *testing.T) {
 
 	_, err := requestAttDoc(srv.URL, []byte{})
 	if err == nil {
-		t.Fatal("should've failed")
+		t.Fatal("Client code should have rejected non-Base64 data but didn't.")
+	}
+}
+
+func TestRequestAttDocDoS(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
+		buf := make([]byte, maxReadLen+1)
+		fmt.Fprintln(w, buf)
+	}))
+	defer srv.Close()
+
+	if _, err := requestAttDoc(srv.URL, []byte{}); err == nil {
+		t.Fatal("Client code should have rejected long response body but didn't.")
 	}
 }
