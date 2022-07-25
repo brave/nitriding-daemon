@@ -111,7 +111,7 @@ func requestAttDoc(addr string, ourAttDoc []byte) ([]byte, error) {
 	b64AttDoc := base64.StdEncoding.EncodeToString(ourAttDoc)
 	resp, err := http.Post(
 		endpoint,
-		"application/octet-stream",
+		"text/plain",
 		bytes.NewBufferString(b64AttDoc),
 	)
 	if err != nil {
