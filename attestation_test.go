@@ -9,9 +9,7 @@ import (
 )
 
 func expect(t *testing.T, resp *http.Response, statusCode int, errMsg string) {
-	if resp.StatusCode != statusCode {
-		t.Fatalf("expected status code %d but got %d", statusCode, resp.StatusCode)
-	}
+	t.Helper()
 	if errMsg == "" {
 		return
 	}
@@ -26,6 +24,9 @@ func expect(t *testing.T, resp *http.Response, statusCode int, errMsg string) {
 	}()
 	if strings.TrimSuffix(string(payload), "\n") != errMsg {
 		t.Fatalf("expected error %q but got %q", errMsg, string(payload))
+	}
+	if resp.StatusCode != statusCode {
+		t.Fatalf("expected status code %d but got %d", statusCode, resp.StatusCode)
 	}
 }
 
