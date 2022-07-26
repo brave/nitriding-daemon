@@ -1,63 +1,76 @@
 package nitriding
 
 import (
-	"crypto/rand"
+	cryptoRand "crypto/rand"
 	"encoding/base64"
 	"errors"
+
+	"golang.org/x/crypto/nacl/box"
 )
 
 const (
-	sbKeyLen   = 32 // secretbox's key length.
-	sbNonceLen = 24 // secretbox's nonce length.
+	boxKeyLen   = 32 // NaCl box's private and public key length.
+	boxNonceLen = 24 // NaCl box's nonce length.
 )
 
 var (
 	// Instead of using rand.Read directly, we use this variable to facilitate
 	// testing.
-	cryptoRead = rand.Read
+	cryptoRead = cryptoRand.Read
 )
 
 // nonce represents a nonce that's used to prove the freshness of an enclave's
 // attestation document.
 type nonce [nonceLen]byte
 
-// sbKeyLen represents key material for secretbox, i.e., a nonce and a key.
-type sbKey struct {
-	nonce [sbNonceLen]byte
-	key   [sbKeyLen]byte
+// boxKey represents key material for NaCl's box, i.e., a nonce and a key
+// pair.
+type boxKey struct {
+	nonce   *[boxNonceLen]byte
+	pubKey  *[boxKeyLen]byte
+	privKey *[boxKeyLen]byte
 }
 
-// newSbKey creates and returns key material (i.e., a secret key and a nonce)
-// for use with secretbox.
-func newSbKey() (*sbKey, error) {
-	k := &sbKey{}
+// newBoxKey creates and returns key material (i.e., a key pair and a nonce)
+// for use with box.
+func newBoxKey() (*boxKey, error) {
+	var err error
+	k := &boxKey{
+		nonce: &[boxNonceLen]byte{},
+	}
 
-	if _, err := cryptoRead(k.key[:]); err != nil {
+	k.pubKey, k.privKey, err = box.GenerateKey(cryptoRand.Reader)
+	if err != nil {
 		return nil, err
 	}
-	if _, err := cryptoRead(k.nonce[:]); err != nil {
+
+	if _, err = cryptoRead(k.nonce[:]); err != nil {
 		return nil, err
 	}
 
 	return k, nil
 }
 
-// newSbKeyFromBytes returns the sbKey struct that's represented by the given
-// byte slice.
-func newSbKeyFromBytes(b []byte) (*sbKey, error) {
-	if len(b) != (sbNonceLen + sbKeyLen) {
-		return nil, errors.New("incorrect length of given secretbox key material")
+// newBoxKeyFromBytes returns the boxKey struct that's represented by the
+// given byte slice.
+func newBoxKeyFromBytes(b []byte) (*boxKey, error) {
+	if len(b) != (boxNonceLen + boxKeyLen) {
+		return nil, errors.New("incorrect length of given box key material")
 	}
 
-	k := &sbKey{}
-	copy(k.nonce[:], b[:sbNonceLen])
-	copy(k.key[:], b[sbNonceLen:])
+	k := &boxKey{
+		nonce:   &[boxNonceLen]byte{},
+		pubKey:  &[boxKeyLen]byte{},
+		privKey: &[boxKeyLen]byte{},
+	}
+	copy(k.nonce[:], b[:boxNonceLen])
+	copy(k.pubKey[:], b[boxNonceLen:])
 	return k, nil
 }
 
-// Bytes returns the key material in the form of a byte slice.
-func (k *sbKey) Bytes() []byte {
-	return append(k.nonce[:], k.key[:]...)
+// Bytes returns the public key material in the form of a byte slice.
+func (k *boxKey) Bytes() []byte {
+	return append(k.nonce[:], k.pubKey[:]...)
 }
 
 // newNonce creates and returns a cryptographically secure, random nonce.

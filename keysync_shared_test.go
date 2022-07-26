@@ -3,34 +3,41 @@ package nitriding
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
 
-func TestSbKeyRandomness(t *testing.T) {
-	k1, _ := newSbKey()
-	k2, _ := newSbKey()
+func TestBoxKeyRandomness(t *testing.T) {
+	k1, _ := newBoxKey()
+	k2, _ := newBoxKey()
 
 	// It's notoriously difficult to test if something is truly random.  Here,
 	// we simply make sure that two subsequently generated key pairs are not
 	// identical.  That's a low bar to pass but better than nothing.
 	if k1.nonce == k2.nonce {
-		t.Errorf("Nonces of two separate secretbox keys are identical.")
+		t.Errorf("Nonces of two separate box keys are identical.")
 	}
-	if k1.key == k2.key {
-		t.Errorf("Keys of two separate secretbox keys are identical.")
+	if k1.pubKey == k2.pubKey {
+		t.Errorf("Keys of two separate box keys are identical.")
 	}
 }
 
-func TestSbKeySerialization(t *testing.T) {
-	k1, _ := newSbKey()
-	k2, _ := newSbKeyFromBytes(k1.Bytes())
+func TestBoxKeySerialization(t *testing.T) {
+	k1, _ := newBoxKey()
+	k2, _ := newBoxKeyFromBytes(k1.Bytes())
 
-	if k1.nonce != k2.nonce || k1.key != k2.key {
+	fmt.Println(k1.nonce)
+	fmt.Println(k1.pubKey)
+
+	fmt.Println(k2.nonce)
+	fmt.Println(k2.pubKey)
+
+	if *k1.nonce != *k2.nonce || *k1.pubKey != *k2.pubKey {
 		t.Errorf("Key no longer identical after encoding and decoding.")
 	}
 
-	_, err := newSbKeyFromBytes([]byte{})
+	_, err := newBoxKeyFromBytes([]byte{})
 	if err == nil {
 		t.Errorf("Expected an error because no bytes were provided.")
 	}
@@ -55,7 +62,7 @@ func TestErrors(t *testing.T) {
 		cryptoRead = rand.Read
 	}()
 
-	if _, err := newSbKey(); err == nil {
+	if _, err := newBoxKey(); err == nil {
 		t.Errorf("Failed to return error")
 	}
 	if _, err := newNonce(); err == nil {

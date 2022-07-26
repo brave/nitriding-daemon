@@ -1,6 +1,7 @@
 package nitriding
 
 import (
+	cryptoRand "crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -10,7 +11,7 @@ import (
 	"time"
 
 	"github.com/hf/nitrite"
-	"golang.org/x/crypto/nacl/secretbox"
+	"golang.org/x/crypto/nacl/box"
 )
 
 var (
@@ -20,7 +21,7 @@ var (
 	errFailedRespBody  = "failed to read response body"
 	errFailedPCR       = "failed to get PCR values"
 	errFailedFindNonce = "could not find provided nonce"
-	errInvalidSbKeys   = "invalid secretbox key material"
+	errInvalidBoxKeys  = "invalid box key material"
 	errPCRNotIdentical = "remote enclave's PCR values not identical"
 )
 
@@ -90,9 +91,9 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 		// the attestation document's "user data" field.
 		copy(theirNonce[:], theirAttDoc.UserData)
 
-		sbKey, err := newSbKeyFromBytes(theirAttDoc.PublicKey)
+		theirBoxKey, err := newBoxKeyFromBytes(theirAttDoc.PublicKey)
 		if err != nil {
-			http.Error(w, errInvalidSbKeys, http.StatusBadRequest)
+			http.Error(w, errInvalidBoxKeys, http.StatusBadRequest)
 			return
 		}
 
@@ -103,7 +104,15 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 			return
 		}
 		var encrypted []byte
-		secretbox.Seal(encrypted, jsonKeyMaterial, &sbKey.nonce, &sbKey.key)
+		if _, err = box.SealAnonymous(
+			encrypted,
+			jsonKeyMaterial,
+			theirBoxKey.pubKey,
+			cryptoRand.Reader,
+		); err != nil {
+			http.Error(w, "failed to encrypt key material", http.StatusInternalServerError)
+			return
+		}
 
 		// Encapsulate the remote enclave's nonce and the encrypted key
 		// material in an attestation document and send it back.

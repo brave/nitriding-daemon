@@ -1,5 +1,21 @@
 package nitriding
 
+/*
+
+-> Attestation document(
+     Nonce:
+     User data:
+     Public key:
+   )
+
+<- Attestation document(
+     Nonce:       The nonce the requester provided in the first step
+     User data:   Encrypted key material
+     Public key:
+   )
+
+*/
+
 import (
 	"bytes"
 	"encoding/base64"
@@ -12,7 +28,7 @@ import (
 	"time"
 
 	"github.com/hf/nitrite"
-	"golang.org/x/crypto/nacl/secretbox"
+	"golang.org/x/crypto/nacl/box"
 )
 
 // RequestKeys asks a remote enclave to share its key material with us, which
@@ -37,7 +53,7 @@ func RequestKeys(addr string, keyMaterial any) error {
 
 	// Next, create a key that the remote enclave is going to use to encrypt
 	// its key material.
-	sbKey, err := newSbKey()
+	boxKey, err := newBoxKey()
 	if err != nil {
 		return fmt.Errorf("%s: %s", errStr, err)
 	}
@@ -45,7 +61,7 @@ func RequestKeys(addr string, keyMaterial any) error {
 	// Now create an attestation document containing our nonce, the remote
 	// enclave's nonce, and the key material that they remote enclave is
 	// supposed to use.
-	ourAttDoc, err := attest(theirNonce[:], ourNonce[:], sbKey.Bytes())
+	ourAttDoc, err := attest(theirNonce[:], ourNonce[:], boxKey.Bytes())
 	if err != nil {
 		return fmt.Errorf("%s: %s", errStr, err)
 	}
@@ -58,7 +74,7 @@ func RequestKeys(addr string, keyMaterial any) error {
 	}
 
 	// Finally, verify the attestation document and extract the key material.
-	if err := processAttDoc(theirAttDoc, &ourNonce, sbKey, keyMaterial); err != nil {
+	if err := processAttDoc(theirAttDoc, &ourNonce, boxKey, keyMaterial); err != nil {
 		return fmt.Errorf("%s: %s", errStr, err)
 	}
 
@@ -139,7 +155,7 @@ func requestAttDoc(addr string, ourAttDoc []byte) ([]byte, error) {
 func processAttDoc(
 	theirAttDoc []byte,
 	ourNonce *nonce,
-	sbKey *sbKey,
+	boxKey *boxKey,
 	keyMaterial any,
 ) error {
 	errStr := "failed to process attestation doc from remote enclave"
@@ -169,7 +185,11 @@ func processAttDoc(
 
 	// Attempt to decrypt the key material.
 	var decrypted []byte
-	_, ok := secretbox.Open(decrypted, their.Document.PublicKey, &sbKey.nonce, &sbKey.key)
+	_, ok := box.OpenAnonymous(
+		decrypted,
+		their.Document.UserData,
+		boxKey.pubKey,
+		boxKey.privKey)
 	if !ok {
 		return fmt.Errorf("%s: failed to decrypt key material", errStr)
 	}
