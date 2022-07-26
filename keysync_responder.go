@@ -18,8 +18,10 @@ var (
 	errNoBase64        = "failed to Base64-decode attestation document"
 	errFailedVerify    = "failed to verify attestation document"
 	errFailedRespBody  = "failed to read response body"
+	errFailedPCR       = "failed to get PCR values"
 	errFailedFindNonce = "could not find provided nonce"
 	errInvalidSbKeys   = "invalid secretbox key material"
+	errPCRNotIdentical = "remote enclave's PCR values not identical"
 )
 
 type timeFunc func() time.Time
@@ -63,6 +65,17 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 			return
 		}
 		theirAttDoc := res.Document
+
+		// Are the PCR values (i.e. image IDs) identical?
+		ourPCRs, err := getPCRValues()
+		if err != nil {
+			http.Error(w, errFailedPCR, http.StatusInternalServerError)
+			return
+		}
+		if !arePCRsIdentical(ourPCRs, theirAttDoc.PCRs) {
+			http.Error(w, errPCRNotIdentical, http.StatusUnauthorized)
+			return
+		}
 
 		// Did we actually issue the nonce that the remote enclave provided?
 		copy(ourNonce[:], theirAttDoc.Nonce)

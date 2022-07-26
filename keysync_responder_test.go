@@ -82,17 +82,6 @@ func TestKeysHandler(t *testing.T) {
 	// Send Base64-encoded bogus data.
 	res = queryHandler(getKeysHandler(enclave, time.Now), pathKeys, strings.NewReader("Zm9vYmFyCg=="))
 	expect(t, res, http.StatusUnauthorized, errFailedVerify)
-
-	// Send an attestation document without any nonce.
-	res = queryHandler(getKeysHandler(enclave, attDocNoFieldsTime), pathKeys, strings.NewReader(attDocNoFields))
-	expect(t, res, http.StatusUnauthorized, errFailedFindNonce)
-
-	// Send an attestation document with a nonce but no secretbox data.
-	enclave.nonceCache.Add("77Ofqd0vUmm6t89uu4vRtxpHXmY=")
-	res = queryHandler(getKeysHandler(enclave, attDocNoSbTime), pathKeys, strings.NewReader(attDocNoSb))
-	expect(t, res, http.StatusBadRequest, errInvalidSbKeys)
-
-	// Send an attestation document with a nonce and a secretbox key.
 }
 
 func TestKeysHandlerDoS(t *testing.T) {

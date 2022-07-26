@@ -146,21 +146,30 @@ func processAttDoc(
 	// Verify the remote enclave's attestation document before doing anything
 	// with it.
 	opts := nitrite.VerifyOptions{CurrentTime: time.Now().UTC()}
-	res, err := nitrite.Verify(theirAttDoc, opts)
+	their, err := nitrite.Verify(theirAttDoc, opts)
 	if err != nil {
 		return fmt.Errorf("%s: %s", errStr, err)
 	}
 
+	// Are the PCR values (i.e. image IDs) identical?
+	ourPCRs, err := getPCRValues()
+	if err != nil {
+		return fmt.Errorf("%s: %s", errStr, err)
+	}
+	if !arePCRsIdentical(ourPCRs, their.Document.PCRs) {
+		return fmt.Errorf("%s: PCR values of remote enclave not identical to ours", errStr)
+	}
+
 	// Now verify that the remote enclave's attestation document contains the
 	// nonce that we provided earlier.
-	if !bytes.Equal(res.Document.Nonce, ourNonce[:]) {
+	if !bytes.Equal(their.Document.Nonce, ourNonce[:]) {
 		return fmt.Errorf("%s: expected nonce %x but got %x",
-			errStr, ourNonce[:], res.Document.Nonce)
+			errStr, ourNonce[:], their.Document.Nonce)
 	}
 
 	// Attempt to decrypt the key material.
 	var decrypted []byte
-	_, ok := secretbox.Open(decrypted, res.Document.PublicKey, &sbKey.nonce, &sbKey.key)
+	_, ok := secretbox.Open(decrypted, their.Document.PublicKey, &sbKey.nonce, &sbKey.key)
 	if !ok {
 		return fmt.Errorf("%s: failed to decrypt key material", errStr)
 	}
