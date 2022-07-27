@@ -1,20 +1,26 @@
 package nitriding
 
-/*
-
--> Attestation document(
-     Nonce:
-     User data:
-     Public key:
-   )
-
-<- Attestation document(
-     Nonce:       The nonce the requester provided in the first step
-     User data:   Encrypted key material
-     Public key:
-   )
-
-*/
+// AWS Nitro Enclave attestation documents contain three fields (called
+// "nonce", "user data",  and "public key") that can be set by the requester.
+// We are using those fields as follows:
+//
+// When the requesting enclave sends a request to the remote enclave, it sets
+// the following fields in the attestation document:
+//
+// Attestation document(
+//   Nonce:       Remote enclave's nonce
+//   User data:   Requesting enclave's nonce
+//   Public key:  Requesting enclave's box public key
+// )
+//
+// The remote enclave then generates its own attestation document containing
+// the following fields:
+//
+// Attestation document(
+//   Nonce:       The nonce the requester provided in its attestation document
+//   User data:
+//   Public key:  Encrypted key material
+// )
 
 import (
 	"bytes"
@@ -25,7 +31,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/hf/nitrite"
 	"golang.org/x/crypto/nacl/box"
@@ -161,7 +166,7 @@ func processAttDoc(
 	errStr := "failed to process attestation doc from remote enclave"
 	// Verify the remote enclave's attestation document before doing anything
 	// with it.
-	opts := nitrite.VerifyOptions{CurrentTime: time.Now().UTC()}
+	opts := nitrite.VerifyOptions{CurrentTime: currentTime()}
 	their, err := nitrite.Verify(theirAttDoc, opts)
 	if err != nil {
 		return fmt.Errorf("%s: %s", errStr, err)
@@ -184,9 +189,8 @@ func processAttDoc(
 	}
 
 	// Attempt to decrypt the key material.
-	var decrypted []byte
-	_, ok := box.OpenAnonymous(
-		decrypted,
+	decrypted, ok := box.OpenAnonymous(
+		nil,
 		their.Document.UserData,
 		boxKey.pubKey,
 		boxKey.privKey)

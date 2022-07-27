@@ -59,7 +59,7 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 		}
 
 		// Verify the remote enclave's attestation document before touching it.
-		opts := nitrite.VerifyOptions{CurrentTime: curTime().UTC()}
+		opts := nitrite.VerifyOptions{CurrentTime: currentTime()}
 		res, err := nitrite.Verify(theirRawAttDoc, opts)
 		if err != nil {
 			http.Error(w, errFailedVerify, http.StatusUnauthorized)
@@ -81,8 +81,7 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 		// Did we actually issue the nonce that the remote enclave provided?
 		copy(ourNonce[:], theirAttDoc.Nonce)
 		if !e.nonceCache.Exists(ourNonce.B64()) {
-			fmt.Printf("could not find nonce %s\n", ourNonce.B64())
-			http.Error(w, "could not find provided nonce", http.StatusUnauthorized)
+			http.Error(w, errFailedFindNonce, http.StatusUnauthorized)
 			return
 		}
 
