@@ -129,7 +129,7 @@ func attest(nonce, userData, publicKey []byte) ([]byte, error) {
 	res, err := s.Send(&request.Attestation{
 		Nonce:     nonce,
 		UserData:  userData,
-		PublicKey: []byte{},
+		PublicKey: publicKey,
 	})
 	if err != nil {
 		return nil, err
