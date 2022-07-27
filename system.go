@@ -13,17 +13,17 @@ const (
 )
 
 // limitReader behaves like a Reader but it returns errTooMuchToRead if the
-// read limit was met or exceeded.
+// given read limit was exceeded.
 type limitReader struct {
 	io.Reader
 	Limit int
 }
 
 func (l *limitReader) Read(p []byte) (int, error) {
-	if l.Limit <= 0 {
+	if l.Limit < 0 {
 		return 0, errors.New(errTooMuchToRead)
 	}
-	if len(p) > l.Limit {
+	if len(p) > l.Limit && l.Limit > 0 {
 		p = p[0:l.Limit]
 	}
 	n, err := l.Reader.Read(p)

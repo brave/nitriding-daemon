@@ -22,13 +22,13 @@ func TestLimitReader(t *testing.T) {
 
 	// Hand the reader too much.
 	buf := bytes.NewReader(bufContent)
-	if _, err := io.ReadAll(newLimitReader(buf, len(bufContent))); err == nil {
+	if _, err := io.ReadAll(newLimitReader(buf, len(bufContent)-1)); err == nil {
 		t.Fatalf("Expected error %q but got none.", errTooMuchToRead)
 	}
 
 	// Hand the reader the maximum allowable amount.
 	buf = bytes.NewReader(bufContent)
-	ret, err := io.ReadAll(newLimitReader(buf, len(bufContent)+1))
+	ret, err := io.ReadAll(newLimitReader(buf, len(bufContent)))
 	if err != nil {
 		t.Fatal(err)
 	}
