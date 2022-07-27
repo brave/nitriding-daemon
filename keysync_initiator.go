@@ -10,7 +10,7 @@ package nitriding
 // Attestation document(
 //   Nonce:       Remote enclave's nonce
 //   User data:   Requesting enclave's nonce
-//   Public key:  Requesting enclave's box public key
+//   Public key:  Requesting enclave's NaCl box public key
 // )
 //
 // The remote enclave then generates its own attestation document containing
