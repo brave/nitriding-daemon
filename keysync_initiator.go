@@ -18,8 +18,8 @@ package nitriding
 //
 // Attestation document(
 //   Nonce:       The nonce the requester provided in its attestation document
-//   User data:
-//   Public key:  Encrypted key material
+//   User data:   Encrypted key material
+//   Public key:
 // )
 
 import (

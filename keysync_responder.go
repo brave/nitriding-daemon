@@ -115,7 +115,7 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 
 		// Encapsulate the remote enclave's nonce and the encrypted key
 		// material in an attestation document and send it back.
-		ourAttDoc, err := attest(theirNonce[:], nil, encrypted)
+		ourAttDoc, err := attest(theirNonce[:], encrypted, nil)
 		if err != nil {
 			http.Error(w, errFailedAttestation, http.StatusInternalServerError)
 			return
