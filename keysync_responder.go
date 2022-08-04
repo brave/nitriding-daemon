@@ -42,6 +42,8 @@ func getNonceHandler(e *Enclave) http.HandlerFunc {
 	}
 }
 
+// getKeysHandler returns a HandlerFunc that shares our secret key material
+// with the requesting enclave -- after authentication, of course.
 func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var ourNonce, theirNonce nonce
