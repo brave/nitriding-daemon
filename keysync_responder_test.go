@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,7 +33,7 @@ func TestNonceHandler(t *testing.T) {
 	}
 
 	// Did we get what looks like a nonce?
-	b64Nonce, err := ioutil.ReadAll(res.Body)
+	b64Nonce, err := io.ReadAll(res.Body)
 	failOnErr(t, err)
 	rawNonce, err := base64.StdEncoding.DecodeString(string(b64Nonce))
 	if err != nil {
@@ -66,7 +65,7 @@ func TestNonceHandlerIfErr(t *testing.T) {
 	}
 
 	// Did we get the correct error string?
-	errMsg, err := ioutil.ReadAll(res.Body)
+	errMsg, err := io.ReadAll(res.Body)
 	failOnErr(t, err)
 	if strings.TrimSpace(string(errMsg)) != errFailedNonce {
 		t.Fatalf("Expected error message %q but got %q.", errFailedNonce, errMsg)

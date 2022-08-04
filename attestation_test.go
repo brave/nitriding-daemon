@@ -1,7 +1,7 @@
 package nitriding
 
 import (
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +13,7 @@ func expect(t *testing.T, resp *http.Response, statusCode int, errMsg string) {
 	if errMsg == "" {
 		return
 	}
-	payload, err := ioutil.ReadAll(resp.Body)
+	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("failed to read HTTP response body: %v", err)
 	}
