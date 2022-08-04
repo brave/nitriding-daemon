@@ -3,7 +3,6 @@ package nitriding
 import (
 	cryptoRand "crypto/rand"
 	"encoding/base64"
-	"errors"
 	"time"
 
 	"golang.org/x/crypto/nacl/box"
@@ -38,26 +37,6 @@ func newBoxKey() (*boxKey, error) {
 		return nil, err
 	}
 	return &boxKey{pubKey: pubKey, privKey: privKey}, nil
-}
-
-// newBoxKeyFromBytes turns the given byte slice into a box public key,
-// encapsulated in a boxKey struct.
-func newBoxKeyFromBytes(b []byte) (*boxKey, error) {
-	if len(b) != boxKeyLen {
-		return nil, errors.New("incorrect length of given box key material")
-	}
-
-	k := &boxKey{
-		pubKey:  &[boxKeyLen]byte{},
-		privKey: &[boxKeyLen]byte{},
-	}
-	copy(k.pubKey[:], b[:boxKeyLen])
-	return k, nil
-}
-
-// Bytes returns the public key material in the form of a byte slice.
-func (k *boxKey) Bytes() []byte {
-	return k.pubKey[:]
 }
 
 // newNonce creates and returns a cryptographically secure, random nonce.

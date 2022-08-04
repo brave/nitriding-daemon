@@ -90,11 +90,12 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 		// the attestation document's "user data" field.
 		copy(theirNonce[:], theirAttDoc.UserData)
 
-		theirBoxKey, err := newBoxKeyFromBytes(theirAttDoc.PublicKey)
-		if err != nil {
+		if len(theirAttDoc.PublicKey) != boxKeyLen {
 			http.Error(w, errInvalidBoxKeys, http.StatusBadRequest)
 			return
 		}
+		theirBoxPubKey := &[boxKeyLen]byte{}
+		copy(theirBoxPubKey[:], theirAttDoc.PublicKey[:])
 
 		// Encrypt our key material with the provided key.
 		jsonKeyMaterial, err := json.Marshal(e.keyMaterial)
@@ -106,7 +107,7 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 		if _, err = box.SealAnonymous(
 			encrypted,
 			jsonKeyMaterial,
-			theirBoxKey.pubKey,
+			theirBoxPubKey,
 			cryptoRand.Reader,
 		); err != nil {
 			http.Error(w, "failed to encrypt key material", http.StatusInternalServerError)

@@ -31,25 +31,6 @@ func TestBoxKeyRandomness(t *testing.T) {
 	}
 }
 
-func TestBoxKeySerialization(t *testing.T) {
-	// Make sure that serialization and subsequent deserialization of a public
-	// key results in the same public key.
-	k1, err := newBoxKey()
-	failOnErr(t, err)
-	k2, err := newBoxKeyFromBytes(k1.Bytes())
-	failOnErr(t, err)
-
-	if *k1.pubKey != *k2.pubKey {
-		t.Fatal("Key no longer identical after encoding and decoding.")
-	}
-
-	// Finally, make sure that newBoxKeyFromBytes fails if we provide an empty
-	// byte slice.
-	if _, err = newBoxKeyFromBytes([]byte{}); err == nil {
-		t.Fatal("Expected an error because no bytes were provided.")
-	}
-}
-
 func TestNonce(t *testing.T) {
 	n1, err := newNonce()
 	failOnErr(t, err)

@@ -66,7 +66,7 @@ func RequestKeys(addr string, keyMaterial any) error {
 	// Now create an attestation document containing our nonce, the remote
 	// enclave's nonce, and the key material that they remote enclave is
 	// supposed to use.
-	ourAttDoc, err := attest(theirNonce[:], ourNonce[:], boxKey.Bytes())
+	ourAttDoc, err := attest(theirNonce[:], ourNonce[:], boxKey.pubKey[:])
 	if err != nil {
 		return fmt.Errorf("%s: %s", errStr, err)
 	}
