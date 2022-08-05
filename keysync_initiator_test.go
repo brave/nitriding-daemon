@@ -58,7 +58,7 @@ func TestRequestAttDocDoS(t *testing.T) {
 		maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
 		// Send one byte more than the client is willing to read.
 		buf := make([]byte, maxReadLen+1)
-		fmt.Fprintln(w, buf)
+		fmt.Fprint(w, string(buf))
 	}))
 	defer srv.Close()
 
