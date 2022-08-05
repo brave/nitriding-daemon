@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -42,6 +43,10 @@ const (
 	// parentProxyPort determines the TCP port of the SOCKS proxy that's
 	// running on the parent EC2 instance.
 	parentProxyPort = 1080
+	pathNonce       = "/nonce"
+	pathAttestation = "/attestation"
+	pathKeys        = "/keys"
+	pathRoot        = "/"
 )
 
 var (
@@ -50,10 +55,13 @@ var (
 
 // Enclave represents a service running inside an AWS Nitro Enclave.
 type Enclave struct {
-	cfg     *Config
-	httpSrv http.Server
-	router  *chi.Mux
-	certFpr [sha256.Size]byte
+	sync.RWMutex
+	cfg         *Config
+	httpSrv     http.Server
+	router      *chi.Mux
+	certFpr     [sha256.Size]byte
+	nonceCache  *cache
+	keyMaterial any
 }
 
 // Config represents the configuration of our enclave service.
@@ -78,6 +86,7 @@ func NewEnclave(cfg *Config) *Enclave {
 			Addr:    fmt.Sprintf(":%d", cfg.Port),
 			Handler: r,
 		},
+		nonceCache: newCache(defaultItemExpiry),
 	}
 	if cfg.Debug {
 		e.router.Use(middleware.Logger)
@@ -119,9 +128,11 @@ func (e *Enclave) Start() error {
 		return fmt.Errorf("%s: failed to create certificate: %v", errPrefix, err)
 	}
 	if inEnclave {
-		e.router.Get("/attestation", getAttestationHandler(&e.certFpr))
+		e.router.Get(pathAttestation, getAttestationHandler(&e.certFpr))
 	}
-	e.router.Get("/", getIndexHandler(e.cfg))
+	e.router.Get(pathNonce, getNonceHandler(e))
+	e.router.Get(pathKeys, getKeysHandler(e, time.Now))
+	e.router.Get(pathRoot, getIndexHandler(e.cfg))
 
 	// Tell Go's HTTP library to use SOCKS proxy for both HTTP and HTTPS.
 	if err := os.Setenv("HTTP_PROXY", e.cfg.SOCKSProxy); err != nil {
@@ -367,4 +378,29 @@ func (e *Enclave) AddRoute(method, pattern string, handlerFn http.HandlerFunc) {
 	case http.MethodTrace:
 		e.router.Trace(pattern, handlerFn)
 	}
+}
+
+// SetKeyMaterial registers the enclave's key material (e.g., secret encryption
+// keys) as being ready to be synchronized to other, identical enclaves.  Note
+// that the key material's underlying data structure must be marshallable to
+// JSON.
+//
+// This is only necessary if you intend to scale enclaves horizontally.  If you
+// will only ever run a single enclave, ignore this function.
+func (e *Enclave) SetKeyMaterial(keyMaterial any) {
+	e.Lock()
+	defer e.Unlock()
+
+	e.keyMaterial = keyMaterial
+}
+
+// KeyMaterial returns the key material or, if none was registered, an error.
+func (e *Enclave) KeyMaterial() (any, error) {
+	e.RLock()
+	defer e.RUnlock()
+
+	if e.keyMaterial == nil {
+		return nil, errors.New("no key material registered")
+	}
+	return e.keyMaterial, nil
 }

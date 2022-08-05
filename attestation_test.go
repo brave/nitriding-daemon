@@ -1,7 +1,7 @@
 package nitriding
 
 import (
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,13 +9,11 @@ import (
 )
 
 func expect(t *testing.T, resp *http.Response, statusCode int, errMsg string) {
-	if resp.StatusCode != statusCode {
-		t.Fatalf("expected status code %d but got %d", statusCode, resp.StatusCode)
-	}
+	t.Helper()
 	if errMsg == "" {
 		return
 	}
-	payload, err := ioutil.ReadAll(resp.Body)
+	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("failed to read HTTP response body: %v", err)
 	}
@@ -26,6 +24,9 @@ func expect(t *testing.T, resp *http.Response, statusCode int, errMsg string) {
 	}()
 	if strings.TrimSuffix(string(payload), "\n") != errMsg {
 		t.Fatalf("expected error %q but got %q", errMsg, string(payload))
+	}
+	if resp.StatusCode != statusCode {
+		t.Fatalf("expected status code %d but got %d", statusCode, resp.StatusCode)
 	}
 }
 
@@ -58,4 +59,28 @@ func TestAttestationHandler(t *testing.T) {
 
 	// We are unable to test the successful issuing of an attestation document
 	// on a non-Nitro system.
+}
+
+func TestArePCRsIdentical(t *testing.T) {
+	pcr1 := map[uint][]byte{
+		1: []byte("foobar"),
+	}
+	pcr2 := map[uint][]byte{
+		1: []byte("foobar"),
+	}
+	if !arePCRsIdentical(pcr1, pcr2) {
+		t.Fatal("Failed to recognize identical PCRs as such.")
+	}
+
+	// Add a new PCR value, so our two maps are no longer identical.
+	pcr1[2] = []byte("barfoo")
+	if arePCRsIdentical(pcr1, pcr2) {
+		t.Fatal("Failed to recognize different PCRs as such.")
+	}
+
+	// Add the same PCR ID but with a different value.
+	pcr2[2] = []byte("foobar")
+	if arePCRsIdentical(pcr1, pcr2) {
+		t.Fatal("Failed to recognize different PCRs as such.")
+	}
 }
