@@ -56,6 +56,7 @@ func TestRequestAttDoc(t *testing.T) {
 func TestRequestAttDocDoS(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
+		// Send one byte more than the client is willing to read.
 		buf := make([]byte, maxReadLen+1)
 		fmt.Fprintln(w, buf)
 	}))
