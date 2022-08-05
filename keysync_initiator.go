@@ -98,7 +98,7 @@ func requestNonce(addr string) (nonce, error) {
 	defer resp.Body.Close()
 
 	maxReadLen := base64.StdEncoding.EncodedLen(nonceLen)
-	body, err := io.ReadAll(newLimitReader(resp.Body, maxReadLen+1))
+	body, err := io.ReadAll(newLimitReader(resp.Body, maxReadLen))
 	if err != nil {
 		return nonce{}, fmt.Errorf("%s: %s", errStr, err)
 	}
@@ -141,7 +141,7 @@ func requestAttDoc(addr string, ourAttDoc []byte) ([]byte, error) {
 	defer resp.Body.Close()
 
 	maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
-	body, err := io.ReadAll(newLimitReader(resp.Body, maxReadLen+1))
+	body, err := io.ReadAll(newLimitReader(resp.Body, maxReadLen))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %s", errStr, err)
 	}
