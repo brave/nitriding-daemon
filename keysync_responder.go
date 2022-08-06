@@ -4,6 +4,7 @@ import (
 	cryptoRand "crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,14 +16,14 @@ import (
 )
 
 var (
-	errFailedNonce     = "failed to create nonce"
-	errNoBase64        = "failed to Base64-decode attestation document"
-	errFailedVerify    = "failed to verify attestation document"
-	errFailedRespBody  = "failed to read response body"
-	errFailedPCR       = "failed to get PCR values"
-	errFailedFindNonce = "could not find provided nonce"
-	errInvalidBoxKeys  = "invalid box key material"
-	errPCRNotIdentical = "remote enclave's PCR values not identical"
+	errFailedNonce     = errors.New("failed to create nonce")
+	errNoBase64        = errors.New("failed to Base64-decode attestation document")
+	errFailedVerify    = errors.New("failed to verify attestation document")
+	errFailedRespBody  = errors.New("failed to read response body")
+	errFailedPCR       = errors.New("failed to get PCR values")
+	errFailedFindNonce = errors.New("could not find provided nonce")
+	errInvalidBoxKeys  = errors.New("invalid box key material")
+	errPCRNotIdentical = errors.New("remote enclave's PCR values not identical")
 )
 
 type timeFunc func() time.Time
@@ -33,7 +34,7 @@ func getNonceHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nonce, err := newNonce()
 		if err != nil {
-			http.Error(w, errFailedNonce, http.StatusInternalServerError)
+			http.Error(w, errFailedNonce.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -51,12 +52,12 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 		maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(maxReadLen)))
 		if err != nil {
-			http.Error(w, errFailedRespBody, http.StatusInternalServerError)
+			http.Error(w, errFailedRespBody.Error(), http.StatusInternalServerError)
 			return
 		}
 		theirRawAttDoc, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))
 		if err != nil {
-			http.Error(w, errNoBase64, http.StatusInternalServerError)
+			http.Error(w, errNoBase64.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -64,7 +65,7 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 		opts := nitrite.VerifyOptions{CurrentTime: currentTime()}
 		res, err := nitrite.Verify(theirRawAttDoc, opts)
 		if err != nil {
-			http.Error(w, errFailedVerify, http.StatusUnauthorized)
+			http.Error(w, errFailedVerify.Error(), http.StatusUnauthorized)
 			return
 		}
 		theirAttDoc := res.Document
@@ -72,18 +73,18 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 		// Are the PCR values (i.e. image IDs) identical?
 		ourPCRs, err := getPCRValues()
 		if err != nil {
-			http.Error(w, errFailedPCR, http.StatusInternalServerError)
+			http.Error(w, errFailedPCR.Error(), http.StatusInternalServerError)
 			return
 		}
 		if !arePCRsIdentical(ourPCRs, theirAttDoc.PCRs) {
-			http.Error(w, errPCRNotIdentical, http.StatusUnauthorized)
+			http.Error(w, errPCRNotIdentical.Error(), http.StatusUnauthorized)
 			return
 		}
 
 		// Did we actually issue the nonce that the remote enclave provided?
 		copy(ourNonce[:], theirAttDoc.Nonce)
 		if !e.nonceCache.Exists(ourNonce.B64()) {
-			http.Error(w, errFailedFindNonce, http.StatusUnauthorized)
+			http.Error(w, errFailedFindNonce.Error(), http.StatusUnauthorized)
 			return
 		}
 
@@ -93,7 +94,7 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 		copy(theirNonce[:], theirAttDoc.UserData)
 
 		if len(theirAttDoc.PublicKey) != boxKeyLen {
-			http.Error(w, errInvalidBoxKeys, http.StatusBadRequest)
+			http.Error(w, errInvalidBoxKeys.Error(), http.StatusBadRequest)
 			return
 		}
 		theirBoxPubKey := &[boxKeyLen]byte{}

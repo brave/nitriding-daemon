@@ -2,6 +2,7 @@ package nitriding
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"syscall"
 	"testing"
@@ -22,15 +23,16 @@ func TestLimitReader(t *testing.T) {
 
 	// Hand the reader too much.
 	buf := bytes.NewReader(bufContent)
-	if _, err := io.ReadAll(newLimitReader(buf, len(bufContent)-1)); err == nil {
-		t.Fatalf("Expected error %q but got none.", errTooMuchToRead)
+	_, err := io.ReadAll(newLimitReader(buf, len(bufContent)-1))
+	if !errors.Is(err, errTooMuchToRead) {
+		t.Fatalf("Expected error %q but got %v.", errTooMuchToRead, err)
 	}
 
 	// Hand the reader the maximum allowable amount.
 	buf = bytes.NewReader(bufContent)
 	ret, err := io.ReadAll(newLimitReader(buf, len(bufContent)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to read maximum allowable amount: %s", err)
 	}
 	if !bytes.Equal(ret, bufContent) {
 		t.Fatalf("Expected to read %q into buffer but got %q.", bufContent, ret)

@@ -7,10 +7,11 @@ import (
 )
 
 const (
-	defaultFdCur     = 65536
-	defaultFdMax     = 65536
-	errTooMuchToRead = "reached read limit"
+	defaultFdCur = 65536
+	defaultFdMax = 65536
 )
+
+var errTooMuchToRead = errors.New("reached read limit")
 
 // limitReader behaves like a Reader but it returns errTooMuchToRead if the
 // given read limit was exceeded.
@@ -28,7 +29,7 @@ func (l *limitReader) Read(p []byte) (int, error) {
 		if n == 0 && errors.Is(err, io.EOF) {
 			return n, err
 		}
-		return 0, errors.New(errTooMuchToRead)
+		return 0, errTooMuchToRead
 	}
 
 	if len(p) > l.Limit {
