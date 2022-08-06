@@ -15,7 +15,7 @@ func TestRequestNonce(t *testing.T) {
 		0x9e, 0x7b, 0xea, 0x29, 0x16, 0x49, 0xeb, 0x03, 0xa2, 0x47,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, expNonce.B64())
+		fmt.Fprint(w, expNonce.B64())
 	}))
 	defer srv.Close()
 

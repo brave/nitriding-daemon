@@ -20,10 +20,18 @@ type limitReader struct {
 }
 
 func (l *limitReader) Read(p []byte) (int, error) {
-	if l.Limit < 0 {
+	// We have reached our limit. Do a 1-byte read into a disposable buffer, to
+	// see if we're at EOF or if there's more.
+	if l.Limit == 0 {
+		n, err := l.Reader.Read([]byte{0})
+		// There was no more data, after all.
+		if n == 0 && errors.Is(err, io.EOF) {
+			return n, err
+		}
 		return 0, errors.New(errTooMuchToRead)
 	}
-	if len(p) > l.Limit && l.Limit > 0 {
+
+	if len(p) > l.Limit {
 		p = p[0:l.Limit]
 	}
 	n, err := l.Reader.Read(p)
