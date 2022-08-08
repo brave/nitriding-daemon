@@ -18,6 +18,29 @@ func checkFdLimit(t *testing.T, cur, max uint64) {
 	}
 }
 
+func TestLimitReaderEOF(t *testing.T) {
+	bufContent := []byte("foo")
+	readBuf := bytes.NewReader(bufContent)
+	writeBuf := make([]byte, len(bufContent)*2)
+
+	lreader := newLimitReader(readBuf, len(bufContent))
+	// The first Read is going to drain the limitReader's buffer but won't
+	// result in an EOF yet.
+	n, _ := lreader.Read(writeBuf)
+	// The next and final Read is going to read 0 bytes (because the buffer is
+	// empty) and return EOF.
+	_, err := lreader.Read(writeBuf)
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("Expected EOF but got %v.", err)
+	}
+	if n != len(bufContent) {
+		t.Fatalf("Expected to read %d bytes but got %d.", len(bufContent), n)
+	}
+	if !bytes.Equal(bufContent, writeBuf[:len(bufContent)]) {
+		t.Fatalf("Expected to read %s but got %s.", bufContent, writeBuf)
+	}
+}
+
 func TestLimitReader(t *testing.T) {
 	bufContent := []byte("foobar")
 
