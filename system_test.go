@@ -26,15 +26,22 @@ func TestLimitReaderEOF(t *testing.T) {
 	lreader := newLimitReader(readBuf, len(bufContent))
 	// The first Read is going to drain the limitReader's buffer but won't
 	// result in an EOF yet.
-	n, _ := lreader.Read(writeBuf)
+	n, err := lreader.Read(writeBuf)
+	if n != len(bufContent) {
+		t.Fatalf("Expected to read %d bytes but got %d.", len(bufContent), n)
+	}
+	if err != nil {
+		t.Fatalf("Expected nil but got %v.", err)
+	}
+
 	// The next and final Read is going to read 0 bytes (because the buffer is
 	// empty) and return EOF.
-	_, err := lreader.Read(writeBuf)
+	n, err = lreader.Read(writeBuf)
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("Expected EOF but got %v.", err)
 	}
-	if n != len(bufContent) {
-		t.Fatalf("Expected to read %d bytes but got %d.", len(bufContent), n)
+	if n != 0 {
+		t.Fatalf("Expected to read 0 bytes but got %d.", n)
 	}
 	if !bytes.Equal(bufContent, writeBuf[:len(bufContent)]) {
 		t.Fatalf("Expected to read %s but got %s.", bufContent, writeBuf)
