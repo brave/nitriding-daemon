@@ -2,6 +2,7 @@ package nitriding
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,7 @@ func TestRequestNonce(t *testing.T) {
 		0x9e, 0x7b, 0xea, 0x29, 0x16, 0x49, 0xeb, 0x03, 0xa2, 0x47,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, expNonce.B64())
+		fmt.Fprint(w, expNonce.B64())
 	}))
 	defer srv.Close()
 
@@ -36,8 +37,9 @@ func TestRequestNonceDoS(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := requestNonce(srv.URL); err == nil {
-		t.Fatal("Client code should have rejected long response body but didn't.")
+	_, err := requestNonce(srv.URL)
+	if !errors.Is(err, errTooMuchToRead) {
+		t.Fatalf("Expected error %q but got %q.", errTooMuchToRead, err)
 	}
 }
 
@@ -62,8 +64,9 @@ func TestRequestAttDocDoS(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := requestAttDoc(srv.URL, []byte{}); err == nil {
-		t.Fatal("Client code should have rejected long response body but didn't.")
+	_, err := requestAttDoc(srv.URL, []byte{})
+	if !errors.Is(err, errTooMuchToRead) {
+		t.Fatalf("Expected error %q but got %q.", errTooMuchToRead, err)
 	}
 }
 

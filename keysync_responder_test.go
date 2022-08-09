@@ -67,8 +67,8 @@ func TestNonceHandlerIfErr(t *testing.T) {
 	// Did we get the correct error string?
 	errMsg, err := io.ReadAll(res.Body)
 	failOnErr(t, err)
-	if strings.TrimSpace(string(errMsg)) != errFailedNonce {
-		t.Fatalf("Expected error message %q but got %q.", errFailedNonce, errMsg)
+	if strings.TrimSpace(string(errMsg)) != errFailedNonce.Error() {
+		t.Fatalf("Expected error message %q but got %q.", errFailedNonce.Error(), errMsg)
 	}
 }
 
@@ -78,11 +78,11 @@ func TestKeysHandlerForBadReqs(t *testing.T) {
 
 	// Send non-Base64 bogus data.
 	res = queryHandler(getKeysHandler(enclave, time.Now), pathKeys, strings.NewReader("foobar!"))
-	expect(t, res, http.StatusInternalServerError, errNoBase64)
+	expect(t, res, http.StatusInternalServerError, errNoBase64.Error())
 
 	// Send Base64-encoded bogus data.
 	res = queryHandler(getKeysHandler(enclave, time.Now), pathKeys, strings.NewReader("Zm9vYmFyCg=="))
-	expect(t, res, http.StatusUnauthorized, errFailedVerify)
+	expect(t, res, http.StatusUnauthorized, errFailedVerify.Error())
 }
 
 func TestKeysHandler(t *testing.T) {
@@ -110,7 +110,7 @@ func TestKeysHandlerDoS(t *testing.T) {
 	maxSize := base64.StdEncoding.EncodedLen(maxAttDocLen)
 	body := make([]byte, maxSize+1)
 	res = queryHandler(getKeysHandler(enclave, time.Now), pathKeys, bytes.NewReader(body))
-	expect(t, res, http.StatusInternalServerError, errFailedRespBody)
+	expect(t, res, http.StatusInternalServerError, errFailedRespBody.Error())
 }
 
 var initAttInfo = &remoteAttInfo{

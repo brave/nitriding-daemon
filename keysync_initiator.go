@@ -47,20 +47,20 @@ func RequestKeys(addr string, keyMaterial any) error {
 	// First, request a nonce from the remote enclave.
 	theirNonce, err := requestNonce(addr)
 	if err != nil {
-		return fmt.Errorf("%s: %s", errStr, err)
+		return fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	// Now, create our own nonce.
 	ourNonce, err := newNonce()
 	if err != nil {
-		return fmt.Errorf("%s: %s", errStr, err)
+		return fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	// Next, create a key that the remote enclave is going to use to encrypt
 	// its key material.
 	boxKey, err := newBoxKey()
 	if err != nil {
-		return fmt.Errorf("%s: %s", errStr, err)
+		return fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	// Now create an attestation document containing our nonce, the remote
@@ -68,19 +68,19 @@ func RequestKeys(addr string, keyMaterial any) error {
 	// supposed to use.
 	ourAttDoc, err := attest(theirNonce[:], ourNonce[:], boxKey.pubKey[:])
 	if err != nil {
-		return fmt.Errorf("%s: %s", errStr, err)
+		return fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	// Send our attestation document to the remote enclave, and get theirs in
 	// return.
 	theirAttDoc, err := requestAttDoc(addr, ourAttDoc)
 	if err != nil {
-		return fmt.Errorf("%s: %s", errStr, err)
+		return fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	// Finally, verify the attestation document and extract the key material.
 	if err := processAttDoc(theirAttDoc, &ourNonce, boxKey, keyMaterial); err != nil {
-		return fmt.Errorf("%s: %s", errStr, err)
+		return fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	return nil
@@ -93,20 +93,20 @@ func requestNonce(addr string) (nonce, error) {
 	endpoint := fmt.Sprintf("%s%s", addr, pathNonce)
 	resp, err := http.Get(endpoint)
 	if err != nil {
-		return nonce{}, fmt.Errorf("%s: %s", errStr, err)
+		return nonce{}, fmt.Errorf("%s: %w", errStr, err)
 	}
 	defer resp.Body.Close()
 
 	maxReadLen := base64.StdEncoding.EncodedLen(nonceLen)
 	body, err := io.ReadAll(newLimitReader(resp.Body, maxReadLen))
 	if err != nil {
-		return nonce{}, fmt.Errorf("%s: %s", errStr, err)
+		return nonce{}, fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	// Decode the Base64-encoded nonce.
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))
 	if err != nil {
-		return nonce{}, fmt.Errorf("%s: %s", errStr, err)
+		return nonce{}, fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	if len(raw) != nonceLen {
@@ -136,19 +136,19 @@ func requestAttDoc(addr string, ourAttDoc []byte) ([]byte, error) {
 		bytes.NewBufferString(b64AttDoc),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %s", errStr, err)
+		return nil, fmt.Errorf("%s: %w", errStr, err)
 	}
 	defer resp.Body.Close()
 
 	maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
 	body, err := io.ReadAll(newLimitReader(resp.Body, maxReadLen))
 	if err != nil {
-		return nil, fmt.Errorf("%s: %s", errStr, err)
+		return nil, fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	theirAttDoc, err := base64.StdEncoding.DecodeString(string(body))
 	if err != nil {
-		return nil, fmt.Errorf("%s: %s", errStr, err)
+		return nil, fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	return theirAttDoc, nil
@@ -169,13 +169,13 @@ func processAttDoc(
 	opts := nitrite.VerifyOptions{CurrentTime: currentTime()}
 	their, err := nitrite.Verify(theirAttDoc, opts)
 	if err != nil {
-		return fmt.Errorf("%s: %s", errStr, err)
+		return fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	// Are the PCR values (i.e. image IDs) identical?
 	ourPCRs, err := getPCRValues()
 	if err != nil {
-		return fmt.Errorf("%s: %s", errStr, err)
+		return fmt.Errorf("%s: %w", errStr, err)
 	}
 	if !arePCRsIdentical(ourPCRs, their.Document.PCRs) {
 		return fmt.Errorf("%s: PCR values of remote enclave not identical to ours", errStr)
@@ -200,7 +200,7 @@ func processAttDoc(
 
 	// Finally, write the JSON-encoded key material to the provided interface.
 	if err := json.Unmarshal(decrypted, keyMaterial); err != nil {
-		return fmt.Errorf("%s: %s", errStr, err)
+		return fmt.Errorf("%s: %w", errStr, err)
 	}
 
 	return nil

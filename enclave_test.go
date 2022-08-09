@@ -59,7 +59,7 @@ func TestKeyMaterial(t *testing.T) {
 	e := createEnclave()
 	k := struct{ Foo string }{"foobar"}
 
-	if _, err := e.KeyMaterial(); err == nil {
+	if _, err := e.KeyMaterial(); err != errNoKeyMaterial {
 		t.Fatal("Expected error because we're trying to retrieve non-existing key material.")
 	}
 
