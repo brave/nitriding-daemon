@@ -28,7 +28,7 @@ import (
 	"github.com/mdlayher/vsock"
 
 	"github.com/brave-experiments/nitriding/randseed"
-	"github.com/brave-experiments/viproxy"
+	"github.com/brave/viproxy"
 	"golang.org/x/crypto/acme/autocert"
 )
 
