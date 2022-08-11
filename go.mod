@@ -1,6 +1,6 @@
 module github.com/brave-experiments/nitriding
 
-go 1.18
+go 1.19
 
 require (
 	github.com/brave/viproxy v0.1.2
