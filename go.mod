@@ -3,7 +3,7 @@ module github.com/brave-experiments/nitriding
 go 1.18
 
 require (
-	github.com/brave-experiments/viproxy v0.1.0
+	github.com/brave/viproxy v0.1.2
 	github.com/go-chi/chi/v5 v5.0.7
 	github.com/hf/nitrite v0.0.0-20211104000856-f9e0dcc73703
 	github.com/hf/nsm v0.0.0-20211106132757-1ae65a6a69ae

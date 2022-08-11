@@ -1,5 +1,5 @@
-github.com/brave-experiments/viproxy v0.1.0 h1:Lxrzd3jbhE+m5sNImVjGPNp3U/f7o5S0Rq7UsBz/ons=
-github.com/brave-experiments/viproxy v0.1.0/go.mod h1:CrBnXWQMvk+MvCyOoUMBGD68l9tTCWjLpyc3ccoPf+8=
+github.com/brave/viproxy v0.1.2 h1:sOY8bI1CqLNq+KyRJrEzQuWia81UmLjK5kqTqD284hs=
+github.com/brave/viproxy v0.1.2/go.mod h1:E5v9Ajo1sPVAmgDjKDU8fLmkoJeHjtcXJIkEm8XubpQ=
 github.com/docker/libcontainer v2.2.1+incompatible h1:++SbbkCw+X8vAd4j2gOCzZ2Nn7s2xFALTf7LZKmM1/0=
 github.com/docker/libcontainer v2.2.1+incompatible/go.mod h1:osvj61pYsqhNCMLGX31xr7klUBhHb/ZBuXS0o1Fvwbw=
 github.com/fxamacker/cbor/v2 v2.2.0/go.mod h1:TA1xS00nchWmaBnEIxPSE5oHLuJBAVvqrtAnWBwBCVo=
