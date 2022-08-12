@@ -13,7 +13,7 @@ Enclaves.  The package provides the following features:
    having audited your enclave's source code, your users can conveniently
    verify the enclave by using a tool like
    [verify-enclave](https://github.com/brave-experiments/verify-enclave)
-   and by running:
+   and running:
 
    ```
    make verify CODE=/path/to/code/ ENCLAVE=https://example.com/attest
