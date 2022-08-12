@@ -67,14 +67,49 @@ type Enclave struct {
 
 // Config represents the configuration of our enclave service.
 type Config struct {
+	// SOCKSProxy must be set if
+	//   1) your enclave application should obtain a Let's Encrypt-signed
+	//      certificate (i.e., if UseACME is set to true)
+	// or if
+	//   2) your enclave application makes HTTP requests over the Internet.
+	// If so, set SOCKSProxy to "socks5://127.0.0.1:1080".
 	SOCKSProxy string
-	FQDN       string
-	Port       int
-	UseACME    bool
-	Debug      bool
-	FdCur      uint64
-	FdMax      uint64
-	AppURL     string
+
+	// FQDN contains the fully qualified domain name that's set in the HTTPS
+	// certificate of the enclave's Web server, e.g. "example.com".
+	FQDN string
+
+	// Port contains the TCP port that the Web server should listen on, e.g.
+	// 8443.  Note that the Web server listens for this port on the private
+	// VSOCK interface.  This is not an Internet-facing port.
+	Port int
+
+	// UseACME must be set to true if you want your enclave application to
+	// request a Let's Encrypt-signed certificate.  If this is set to false,
+	// the enclave creates a self-signed certificate.
+	UseACME bool
+
+	// Debug can be set to true to see debug messages, i.e., if you are
+	// starting the enclave in debug mode by running:
+	//
+	//   nitro-cli run-enclave --debug-mode ....
+	//
+	// Do not set this to true in production because printing debug messages
+	// for each HTTP request slows down the enclave application, and you are
+	// not able to see debug messages anyway unless you start the enclave using
+	// nitro-cli's "--debug-mode" flag.
+	Debug bool
+
+	// FdCur and FdMax set the soft and hard resource limit, respectively.  The
+	// default for both variables is 65536.
+	FdCur uint64
+	FdMax uint64
+
+	// AppURL should be set to the URL of the software repository that's
+	// running inside the enclave, e.g., "https://github.com/foo/bar".  The URL
+	// is shown on the enclave's index page, as part of instructions on how to
+	// do remote attestation.
+	AppURL string
 }
 
 // NewEnclave creates and returns a new enclave with the given config.
