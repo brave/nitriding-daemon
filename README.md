@@ -1,6 +1,6 @@
 # Nitriding
 
-[![GoDoc](https://pkg.go.dev/badge/github.com/brave-experiments/nitriding?utm_source=godoc)](https://pkg.go.dev/github.com/brave-experiments/nitriding)
+[![GoDoc](https://pkg.go.dev/badge/github.com/brave/nitriding?utm_source=godoc)](https://pkg.go.dev/github.com/brave/nitriding)
 
 This package helps with building Go-based Web applications on top of AWS Nitro
 Enclaves.  The package provides the following features:

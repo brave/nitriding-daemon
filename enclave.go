@@ -27,7 +27,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/mdlayher/vsock"
 
-	"github.com/brave-experiments/nitriding/randseed"
+	"github.com/brave/nitriding/randseed"
 	"github.com/brave/viproxy"
 	"golang.org/x/crypto/acme/autocert"
 )

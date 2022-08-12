@@ -1,4 +1,4 @@
-module github.com/brave-experiments/nitriding
+module github.com/brave/nitriding
 
 go 1.19
 
