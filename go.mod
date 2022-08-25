@@ -10,7 +10,7 @@ require (
 	github.com/mdlayher/vsock v1.1.1
 	github.com/milosgajdos/tenus v0.0.3
 	golang.org/x/crypto v0.0.0-20220824171710-5757bc0c5503
-	golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab
+	golang.org/x/sys v0.0.0-20220825204002-c680a09ffe64
 )
 
 require (
