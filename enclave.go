@@ -310,10 +310,12 @@ func (e *Enclave) setupAcme() error {
 
 	elog.Printf("ACME hostname set to %s.", e.cfg.FQDN)
 	var cache autocert.Cache
-	if err = os.MkdirAll(acmeCertCacheDir, 0700); err != nil {
-		return fmt.Errorf("Failed to create cache directory: %w", err)
+	// Only use the cache directory when we're *not* in an enclave.  There's no
+	// point in writing certificates to disk when in an enclave because the
+	// disk does not persist when the enclave shuts down.
+	if !inEnclave {
+		cache = autocert.DirCache(acmeCertCacheDir)
 	}
-	cache = autocert.DirCache(acmeCertCacheDir)
 	certManager := autocert.Manager{
 		Cache:      cache,
 		Prompt:     autocert.AcceptTOS,
