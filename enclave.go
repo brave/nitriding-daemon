@@ -51,6 +51,7 @@ const (
 
 var (
 	elog             = log.New(os.Stderr, "nitriding: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
+	inEnclave        = false
 	errNoKeyMaterial = errors.New("no key material registered")
 )
 
@@ -112,6 +113,19 @@ type Config struct {
 	AppURL string
 }
 
+// init is called once, at package initialization time.
+func init() {
+	var err error
+
+	// Determine if we're inside an enclave.  Abort execution in the unexpected
+	// case that we cannot tell.
+	elog.Println("Determining whether we're running inside an enclave.")
+	inEnclave, err = randseed.InEnclave()
+	if err != nil {
+		elog.Fatalf("Failed to determine if we're inside an enclave: %v", err)
+	}
+}
+
 // NewEnclave creates and returns a new enclave with the given config.
 func NewEnclave(cfg *Config) *Enclave {
 	r := chi.NewRouter()
@@ -138,10 +152,6 @@ func (e *Enclave) Start() error {
 	var err error
 	errPrefix := "failed to start Nitro Enclave"
 
-	inEnclave, err := randseed.InEnclave()
-	if err != nil {
-		return fmt.Errorf("%s: couldn't determine if we're in enclave: %w", errPrefix, err)
-	}
 	if inEnclave {
 		if err = assignLoAddr(); err != nil {
 			return fmt.Errorf("%s: failed to assign loopback address: %w", errPrefix, err)
@@ -199,10 +209,6 @@ func (e *Enclave) Start() error {
 
 	elog.Printf("Starting Web server on port %s.", e.httpSrv.Addr)
 	var l net.Listener
-	inEnclave, err = randseed.InEnclave()
-	if err != nil {
-		return fmt.Errorf("%s: couldn't determine if we're in enclave: %w", errPrefix, err)
-	}
 
 	// Finally, start the Web server.  If we're inside an enclave, we use a
 	// vsock-enabled listener, otherwise a simple tcp listener.
