@@ -309,10 +309,13 @@ func (e *Enclave) setupAcme() error {
 	var err error
 
 	elog.Printf("ACME hostname set to %s.", e.cfg.FQDN)
-	var cache autocert.Cache
-	// Only use the cache directory when we're *not* in an enclave.  There's no
-	// point in writing certificates to disk when in an enclave because the
-	// disk does not persist when the enclave shuts down.
+	// By default, we use an in-memory certificate cache.  We only use the
+	// directory cache when we're *not* in an enclave.  There's no point in
+	// writing certificates to disk when in an enclave because the disk does
+	// not persist when the enclave shuts down.  Besides, dealing with file
+	// permissions makes it more complicated to switch to an unprivileged user
+	// ID before execution.
+	var cache autocert.Cache = newCertCache()
 	if !inEnclave {
 		cache = autocert.DirCache(acmeCertCacheDir)
 	}
