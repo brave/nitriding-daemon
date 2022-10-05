@@ -309,10 +309,13 @@ func (e *Enclave) setupAcme() error {
 	var err error
 
 	elog.Printf("ACME hostname set to %s.", e.cfg.FQDN)
-	var cache autocert.Cache
-	// Only use the cache directory when we're *not* in an enclave.  There's no
-	// point in writing certificates to disk when in an enclave because the
-	// disk does not persist when the enclave shuts down.
+	// By default, we use an in-memory certificate cache.  We only use the
+	// directory cache when we're *not* in an enclave.  There's no point in
+	// writing certificates to disk when in an enclave because the disk does
+	// not persist when the enclave shuts down.  Besides, dealing with file
+	// permissions makes it more complicated to switch to an unprivileged user
+	// ID before execution.
+	var cache autocert.Cache = newCertCache()
 	if !inEnclave {
 		cache = autocert.DirCache(acmeCertCacheDir)
 	}
@@ -321,33 +324,13 @@ func (e *Enclave) setupAcme() error {
 		Prompt:     autocert.AcceptTOS,
 		HostPolicy: autocert.HostWhitelist([]string{e.cfg.FQDN}...),
 	}
-	go func() {
-		// Let's Encrypt's HTTP-01 challenge requires a listener on port 80:
-		// https://letsencrypt.org/docs/challenge-types/#http-01-challenge
-		var l net.Listener
-		inEnclave, err := randseed.InEnclave()
-		if err != nil {
-			elog.Fatalf("Couldn't determine if we're in enclave: %s", err)
-		}
 
-		if inEnclave {
-			l, err = vsock.Listen(uint32(80), nil)
-			if err != nil {
-				elog.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
-			}
-			defer func() {
-				_ = l.Close()
-			}()
-		} else {
-			l, err = net.Listen("tcp", ":80")
-			if err != nil {
-				elog.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
-			}
-		}
+	errChan := make(chan error)
+	go listenHTTP01(errChan, &certManager)
+	if err := <-errChan; err != nil {
+		return err
+	}
 
-		elog.Print("Starting autocert listener.")
-		_ = http.Serve(l, certManager.HTTPHandler(nil))
-	}()
 	e.httpSrv.TLSConfig = &tls.Config{GetCertificate: certManager.GetCertificate}
 
 	go func() {
