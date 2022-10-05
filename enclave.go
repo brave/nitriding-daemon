@@ -324,33 +324,13 @@ func (e *Enclave) setupAcme() error {
 		Prompt:     autocert.AcceptTOS,
 		HostPolicy: autocert.HostWhitelist([]string{e.cfg.FQDN}...),
 	}
-	go func() {
-		// Let's Encrypt's HTTP-01 challenge requires a listener on port 80:
-		// https://letsencrypt.org/docs/challenge-types/#http-01-challenge
-		var l net.Listener
-		inEnclave, err := randseed.InEnclave()
-		if err != nil {
-			elog.Fatalf("Couldn't determine if we're in enclave: %s", err)
-		}
 
-		if inEnclave {
-			l, err = vsock.Listen(uint32(80), nil)
-			if err != nil {
-				elog.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
-			}
-			defer func() {
-				_ = l.Close()
-			}()
-		} else {
-			l, err = net.Listen("tcp", ":80")
-			if err != nil {
-				elog.Fatalf("Failed to listen for HTTP-01 challenge: %s", err)
-			}
-		}
+	errChan := make(chan error)
+	go listenHTTP01(errChan, &certManager)
+	if err := <-errChan; err != nil {
+		return err
+	}
 
-		elog.Print("Starting autocert listener.")
-		_ = http.Serve(l, certManager.HTTPHandler(nil))
-	}()
 	e.httpSrv.TLSConfig = &tls.Config{GetCertificate: certManager.GetCertificate}
 
 	go func() {

@@ -1,6 +1,7 @@
 package nitriding
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,5 +71,16 @@ func TestKeyMaterial(t *testing.T) {
 	}
 	if r != k {
 		t.Fatal("Retrieved key material is unexpected.")
+	}
+}
+
+func TestSetupAcme(t *testing.T) {
+	e := createEnclave()
+
+	// Our autocert code is difficult to test.  Simply run it until we hit the
+	// first error.  Better than testing nothing.
+	expectedErr := errHTTP01Failed
+	if err := e.setupAcme(); !errors.Is(err, expectedErr) {
+		t.Fatalf("Expected error %v but got %v.", expectedErr, err)
 	}
 }
