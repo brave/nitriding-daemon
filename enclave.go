@@ -164,6 +164,11 @@ func (e *Enclave) Start() error {
 		elog.Printf("Failed to set new file descriptor limit: %s", err)
 	}
 
+	// Set up proxy that facilitates communication with the host.
+	if err = setupProxy(e.cfg); err != nil {
+		elog.Fatal(err)
+	}
+
 	// Get an HTTPS certificate.
 	if e.cfg.UseACME {
 		err = e.setupAcme()
