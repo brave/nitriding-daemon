@@ -50,9 +50,11 @@ const (
 )
 
 var (
-	elog             = log.New(os.Stderr, "nitriding: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
-	inEnclave        = false
-	errNoKeyMaterial = errors.New("no key material registered")
+	elog              = log.New(os.Stderr, "nitriding: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
+	inEnclave         = false
+	errNoKeyMaterial  = errors.New("no key material registered")
+	errCfgMissingFQDN = errors.New("given config is missing FQDN")
+	errCfgMissingPort = errors.New("given config is missing port")
 )
 
 // Enclave represents a service running inside an AWS Nitro Enclave.
@@ -77,12 +79,14 @@ type Config struct {
 	SOCKSProxy string
 
 	// FQDN contains the fully qualified domain name that's set in the HTTPS
-	// certificate of the enclave's Web server, e.g. "example.com".
+	// certificate of the enclave's Web server, e.g. "example.com".  This field
+	// is required.
 	FQDN string
 
 	// Port contains the TCP port that the Web server should listen on, e.g.
 	// 8443.  Note that the Web server listens for this port on the private
-	// VSOCK interface.  This is not an Internet-facing port.
+	// VSOCK interface.  This is not an Internet-facing port.  This field is
+	// required.
 	Port int
 
 	// UseACME must be set to true if you want your enclave application to
@@ -113,6 +117,17 @@ type Config struct {
 	AppURL string
 }
 
+// Validate returns an error if required fields in the config are not set.
+func (c *Config) Validate() error {
+	if c.FQDN == "" {
+		return errCfgMissingFQDN
+	}
+	if c.Port == 0 {
+		return errCfgMissingPort
+	}
+	return nil
+}
+
 // init is called once, at package initialization time.
 func init() {
 	var err error
@@ -127,7 +142,11 @@ func init() {
 }
 
 // NewEnclave creates and returns a new enclave with the given config.
-func NewEnclave(cfg *Config) *Enclave {
+func NewEnclave(cfg *Config) (*Enclave, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("failed to create enclave: %w", err)
+	}
+
 	r := chi.NewRouter()
 	e := &Enclave{
 		cfg:    cfg,
@@ -142,7 +161,7 @@ func NewEnclave(cfg *Config) *Enclave {
 		e.router.Use(middleware.Logger)
 	}
 
-	return e
+	return e, nil
 }
 
 // Start starts the Nitro Enclave.  If it bootstraps correctly, this function

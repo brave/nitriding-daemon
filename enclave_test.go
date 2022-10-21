@@ -19,7 +19,32 @@ func createEnclave() *Enclave {
 		FdCur:      1024,
 		FdMax:      4096,
 	}
-	return NewEnclave(cfg)
+	e, err := NewEnclave(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return e
+}
+
+func TestValidateConfig(t *testing.T) {
+	var err error
+	var c Config
+
+	if err = c.Validate(); err == nil {
+		t.Fatalf("Validation of invalid config did not return an error.")
+	}
+
+	// Set one required field but leave others unset.
+	c.FQDN = "example.com"
+	if err = c.Validate(); err == nil {
+		t.Fatalf("Validation of invalid config did not return an error.")
+	}
+
+	// Set the last required field.
+	c.Port = 1
+	if err = c.Validate(); err != nil {
+		t.Fatalf("Validation of valid config returned an error.")
+	}
 }
 
 func TestGenSelfSignedCert(t *testing.T) {

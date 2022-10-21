@@ -24,7 +24,7 @@ func queryHandler(handler http.HandlerFunc, path string, reader io.Reader) *http
 }
 
 func TestNonceHandler(t *testing.T) {
-	enclave := NewEnclave(&Config{})
+	enclave := createEnclave()
 	res := queryHandler(getNonceHandler(enclave), pathNonce, bytes.NewReader([]byte{}))
 
 	// Did the operation succeed?
@@ -57,7 +57,7 @@ func TestNonceHandlerIfErr(t *testing.T) {
 		cryptoRead = rand.Read
 	}()
 
-	res := queryHandler(getNonceHandler(NewEnclave(&Config{})), pathNonce, bytes.NewReader([]byte{}))
+	res := queryHandler(getNonceHandler(createEnclave()), pathNonce, bytes.NewReader([]byte{}))
 
 	// Did the operation fail?
 	if res.StatusCode != http.StatusInternalServerError {
@@ -74,7 +74,7 @@ func TestNonceHandlerIfErr(t *testing.T) {
 
 func TestKeysHandlerForBadReqs(t *testing.T) {
 	var res *http.Response
-	enclave := NewEnclave(&Config{})
+	enclave := createEnclave()
 
 	// Send non-Base64 bogus data.
 	res = queryHandler(getKeysHandler(enclave, time.Now), pathKeys, strings.NewReader("foobar!"))
@@ -87,7 +87,7 @@ func TestKeysHandlerForBadReqs(t *testing.T) {
 
 func TestKeysHandler(t *testing.T) {
 	var res *http.Response
-	enclave := NewEnclave(&Config{})
+	enclave := createEnclave()
 	enclave.nonceCache.Add(initAttInfo.nonce.B64())
 
 	// Mock functions for our tests to pass.
@@ -104,7 +104,7 @@ func TestKeysHandler(t *testing.T) {
 
 func TestKeysHandlerDoS(t *testing.T) {
 	var res *http.Response
-	enclave := NewEnclave(&Config{})
+	enclave := createEnclave()
 
 	// Send more data than the handler should be willing to read.
 	maxSize := base64.StdEncoding.EncodedLen(maxAttDocLen)

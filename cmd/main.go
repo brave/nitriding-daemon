@@ -10,7 +10,7 @@ import (
 func main() {
 	log.Printf("Running as UID %d.", os.Getuid())
 
-	enclave := nitriding.NewEnclave(
+	enclave, err := nitriding.NewEnclave(
 		&nitriding.Config{
 			FQDN:    "nitro.nymity.ch",
 			Port:    8080,
@@ -18,6 +18,9 @@ func main() {
 			Debug:   true,
 		},
 	)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Start blocks for as long as the enclave is alive.
 	if err := enclave.Start(); err != nil {
