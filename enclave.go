@@ -369,31 +369,6 @@ func (e *Enclave) setCertFingerprint(rawData []byte) error {
 	return nil
 }
 
-// AddRoute adds an HTTP handler for the given HTTP method and pattern.
-func (e *Enclave) AddRoute(method, pattern string, handlerFn http.HandlerFunc) {
-	r := e.pubSrv.Handler.(*chi.Mux)
-	switch method {
-	case http.MethodGet:
-		r.Get(pattern, handlerFn)
-	case http.MethodHead:
-		r.Head(pattern, handlerFn)
-	case http.MethodPost:
-		r.Post(pattern, handlerFn)
-	case http.MethodPut:
-		r.Put(pattern, handlerFn)
-	case http.MethodPatch:
-		r.Patch(pattern, handlerFn)
-	case http.MethodDelete:
-		r.Delete(pattern, handlerFn)
-	case http.MethodConnect:
-		r.Connect(pattern, handlerFn)
-	case http.MethodOptions:
-		r.Options(pattern, handlerFn)
-	case http.MethodTrace:
-		r.Trace(pattern, handlerFn)
-	}
-}
-
 // SetKeyMaterial registers the enclave's key material (e.g., secret encryption
 // keys) as being ready to be synchronized to other, identical enclaves.  Note
 // that the key material's underlying data structure must be marshallable to

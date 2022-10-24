@@ -2,10 +2,6 @@ package nitriding
 
 import (
 	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -50,33 +46,6 @@ func TestGenSelfSignedCert(t *testing.T) {
 	e := createEnclave()
 	if err := e.genSelfSignedCert(); err != nil {
 		t.Fatalf("Failed to create self-signed certificate: %s", err)
-	}
-}
-
-func TestAddRoute(t *testing.T) {
-	pathFoo := "/foo"
-	expectedBody := "foo"
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, expectedBody)
-	}
-
-	e := createEnclave()
-	e.AddRoute(http.MethodGet, pathFoo, handler)
-
-	req := httptest.NewRequest(http.MethodGet, pathFoo, nil)
-	w := httptest.NewRecorder()
-	handler(w, req)
-
-	resp := w.Result()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("Failed to read response body: %s", err)
-	}
-	if string(body) != expectedBody {
-		t.Fatalf("Expected body %q but got %q.", expectedBody, string(body))
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Expected status code %d but got %d.", http.StatusOK, resp.StatusCode)
 	}
 }
 
