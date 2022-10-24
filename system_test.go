@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
 	"syscall"
 	"testing"
 )
@@ -83,4 +84,17 @@ func TestSetFdLimit(t *testing.T) {
 		t.Fatalf("Failed to set file descriptor limit: %s", err)
 	}
 	checkFdLimit(t, defaultFdCur-1, defaultFdMax-1)
+}
+
+func TestCreateUnixSocket(t *testing.T) {
+	fd, err := os.CreateTemp("/tmp", "domainsock")
+	if err != nil {
+		t.Fatalf("Failed to create temporary file: %v", err)
+	}
+	defer os.Remove(fd.Name())
+
+	_, err = createUnixSocket(fd.Name())
+	if err != nil {
+		t.Fatalf("Failed to create unix socket: %v", err)
+	}
 }

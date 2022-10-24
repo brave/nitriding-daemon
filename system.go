@@ -3,6 +3,8 @@ package nitriding
 import (
 	"errors"
 	"io"
+	"net"
+	"os"
 	"syscall"
 )
 
@@ -76,4 +78,19 @@ func setFdLimit(cur, max uint64) error {
 	elog.Printf("Modified file descriptor limit for cur=%d; max=%d.", rLimit.Cur, rLimit.Max)
 
 	return nil
+}
+
+// createUnixSocket creates a unix domain socket at the given path and returns
+// a listener for it.
+func createUnixSocket(sockaddr string) (net.Listener, error) {
+	if err := os.RemoveAll(sockaddr); err != nil {
+		return nil, err
+	}
+
+	l, err := net.Listen("unix", sockaddr)
+	if err != nil {
+		return nil, err
+	}
+
+	return l, nil
 }
