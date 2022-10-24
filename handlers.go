@@ -1,8 +1,20 @@
 package nitriding
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+)
+
+const (
+	// The maximum length of the key material (in bytes) that enclave
+	// applications can PUT to our HTTP API.
+	maxKeyMaterialLen = 1024 * 1024
+)
+
+var (
+	errFailedReqBody = errors.New("failed to read request body")
 )
 
 func formatIndexPage(appURL string) string {
@@ -20,5 +32,20 @@ func formatIndexPage(appURL string) string {
 func getIndexHandler(cfg *Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, formatIndexPage(cfg.AppURL))
+	}
+}
+
+// getRegisterKeysHandler returns a handler that lets the enclave application
+// register its key material with nitriding.  The key material can be arbitrary
+// bytes.
+func getRegisterKeysHandler(e *Enclave) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(newLimitReader(r.Body, maxKeyMaterialLen))
+		if err != nil {
+			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
+			return
+		}
+		e.SetKeyMaterial(body)
+		w.WriteHeader(http.StatusOK)
 	}
 }
