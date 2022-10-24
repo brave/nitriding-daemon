@@ -99,3 +99,7 @@ To test and lint the code, run:
 ```
 make
 ```
+
+## More documentation
+
+* [System architecture](doc/architecture.md)
