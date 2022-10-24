@@ -77,11 +77,11 @@ func TestKeysHandlerForBadReqs(t *testing.T) {
 	enclave := createEnclave()
 
 	// Send non-Base64 bogus data.
-	res = queryHandler(getKeysHandler(enclave, time.Now), pathKeys, strings.NewReader("foobar!"))
+	res = queryHandler(getKeysHandler(enclave, time.Now), pathGetKeys, strings.NewReader("foobar!"))
 	expect(t, res, http.StatusInternalServerError, errNoBase64.Error())
 
 	// Send Base64-encoded bogus data.
-	res = queryHandler(getKeysHandler(enclave, time.Now), pathKeys, strings.NewReader("Zm9vYmFyCg=="))
+	res = queryHandler(getKeysHandler(enclave, time.Now), pathGetKeys, strings.NewReader("Zm9vYmFyCg=="))
 	expect(t, res, http.StatusUnauthorized, errFailedVerify.Error())
 }
 
@@ -96,7 +96,7 @@ func TestKeysHandler(t *testing.T) {
 	}
 	currentTime = func() time.Time { return initAttInfo.attDocTime }
 
-	res = queryHandler(getKeysHandler(enclave, time.Now), pathKeys, strings.NewReader(initAttInfo.attDoc))
+	res = queryHandler(getKeysHandler(enclave, time.Now), pathGetKeys, strings.NewReader(initAttInfo.attDoc))
 	// On a non-enclave platform, the responder code will get as far as to
 	// request its attestation document.
 	expect(t, res, http.StatusInternalServerError, errFailedAttestation)
@@ -109,7 +109,7 @@ func TestKeysHandlerDoS(t *testing.T) {
 	// Send more data than the handler should be willing to read.
 	maxSize := base64.StdEncoding.EncodedLen(maxAttDocLen)
 	body := make([]byte, maxSize+1)
-	res = queryHandler(getKeysHandler(enclave, time.Now), pathKeys, bytes.NewReader(body))
+	res = queryHandler(getKeysHandler(enclave, time.Now), pathGetKeys, bytes.NewReader(body))
 	expect(t, res, http.StatusInternalServerError, errFailedRespBody.Error())
 }
 

@@ -11,13 +11,12 @@ import (
 
 func createEnclave() *Enclave {
 	cfg := &Config{
-		SOCKSProxy: "socks5://127.0.0.1:1080",
-		FQDN:       "example.com",
-		Port:       50000,
-		UseACME:    false,
-		Debug:      false,
-		FdCur:      1024,
-		FdMax:      4096,
+		FQDN:    "example.com",
+		Port:    50000,
+		UseACME: false,
+		Debug:   false,
+		FdCur:   1024,
+		FdMax:   4096,
 	}
 	e, err := NewEnclave(cfg)
 	if err != nil {

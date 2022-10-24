@@ -5,6 +5,7 @@ go 1.19
 require (
 	github.com/brave/viproxy v0.1.2
 	github.com/containers/gvisor-tap-vsock v0.4.0
+	github.com/go-chi/chi v1.5.4
 	github.com/go-chi/chi/v5 v5.0.7
 	github.com/google/gopacket v1.1.19
 	github.com/hf/nitrite v0.0.0-20211104000856-f9e0dcc73703
