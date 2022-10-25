@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/containers/gvisor-tap-vsock/pkg/transport"
 	"github.com/songgao/packets/ethernet"
@@ -29,6 +30,17 @@ const (
 	// mac indicates the MAC address of the enclave.
 	mac = "5a:94:ef:e4:0c:ee"
 )
+
+// runNetworking calls the function that sets up our networking environment.
+// If anything fails, we try again after a brief wait period.
+func runNetworking(c *Config) {
+	for {
+		if err := setupNetworking(c); err != nil {
+			elog.Printf("TAP tunnel to EC2 host failed: %v.  Restarting.", err)
+		}
+		time.Sleep(time.Second)
+	}
+}
 
 // setupNetworking sets up the enclave's networking environment.  In
 // particular, this function:

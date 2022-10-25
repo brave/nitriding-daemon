@@ -159,7 +159,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	m.Get(pathRoot, getIndexHandler(e.cfg))
 	// Register enclave-internal HTTP API.
 	m = e.privSrv.Handler.(*chi.Mux)
-	m.Put(pathPostKeys, getRegisterKeysHandler(e))
+	m.Put(pathPostKeys, getSetKeysHandler(e))
 
 	if cfg.Debug {
 		e.pubSrv.Handler.(*chi.Mux).Use(middleware.Logger)
@@ -183,9 +183,7 @@ func (e *Enclave) Start() error {
 
 	// Set up our networking environment which creates a TAP device that
 	// forwards traffic (via the VSOCK interface) to the EC2 host.
-	if err = setupNetworking(e.cfg); err != nil {
-		return fmt.Errorf("%s: failed to set up proxying: %w", errPrefix, err)
-	}
+	go runNetworking(e.cfg)
 
 	// Get an HTTPS certificate.
 	if e.cfg.UseACME {
