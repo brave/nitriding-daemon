@@ -62,6 +62,7 @@ func setupNetworking(c *Config) error {
 		return fmt.Errorf("failed to connect to host: %w", err)
 	}
 	defer conn.Close()
+	elog.Println("Established connection with EC2 host.")
 
 	req, err := http.NewRequest(http.MethodPost, path, nil)
 	if err != nil {
@@ -70,6 +71,7 @@ func setupNetworking(c *Config) error {
 	if err := req.Write(conn); err != nil {
 		return fmt.Errorf("failed to send POST request to host: %w", err)
 	}
+	elog.Println("Sent HTTP request to EC2 host.")
 
 	// Create a TAP interface.
 	tap, err := water.New(water.Config{
@@ -83,11 +85,13 @@ func setupNetworking(c *Config) error {
 		return fmt.Errorf("failed to create tap device: %w", err)
 	}
 	defer tap.Close()
+	elog.Println("Created TAP device.")
 
 	// Set up networking links.
 	if err := linkUp(); err != nil {
 		return fmt.Errorf("failed to set MAC address: %w", err)
 	}
+	elog.Println("Created networking link.")
 
 	// Spawn goroutines that forward traffic and obtain a DHCP lease.
 	errCh := make(chan error, 1)
@@ -98,6 +102,7 @@ func setupNetworking(c *Config) error {
 			errCh <- fmt.Errorf("failed to run DHCP: %w", err)
 		}
 	}()
+	elog.Println("Started goroutines to forward traffic.")
 	return <-errCh
 }
 
