@@ -10,7 +10,7 @@ import (
 func TestGetRegisterKeysHandler(t *testing.T) {
 	expected := []byte{1, 2, 3, 4, 5} // The key material that we're setting and retrieving.
 	e := createEnclave()
-	handler := getRegisterKeysHandler(e)
+	handler := getSetKeysHandler(e)
 	rec := httptest.NewRecorder()
 	req, err := http.NewRequest(http.MethodPut, pathPostKeys, bytes.NewReader(expected))
 	if err != nil {

@@ -35,10 +35,10 @@ func getIndexHandler(cfg *Config) http.HandlerFunc {
 	}
 }
 
-// getRegisterKeysHandler returns a handler that lets the enclave application
+// getSetKeysHandler returns a handler that lets the enclave application
 // register its key material with nitriding.  The key material can be arbitrary
 // bytes.
-func getRegisterKeysHandler(e *Enclave) http.HandlerFunc {
+func getSetKeysHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(newLimitReader(r.Body, maxKeyMaterialLen))
 		if err != nil {
