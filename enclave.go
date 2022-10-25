@@ -205,7 +205,7 @@ func (e *Enclave) Start() error {
 // startWebServers starts both our public-facing and our enclave-internal Web
 // server in a goroutine.
 func startWebServers(e *Enclave) error {
-	elog.Printf("Starting public (%s) and private (%s) Web server.", e.pubSrv.Addr, e.privSrv.Addr)
+	elog.Printf("Starting public (%s) and private (%s) Web server.", e.pubSrv.Addr, e.cfg.SockAddr)
 
 	l, err := createUnixSocket(e.cfg.SockAddr)
 	if err != nil {
