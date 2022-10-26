@@ -97,7 +97,8 @@ func requestNonce(addr string) (nonce, error) {
 	}
 	defer resp.Body.Close()
 
-	maxReadLen := base64.StdEncoding.EncodedLen(nonceLen)
+	// Add an extra byte to account for the "\n".
+	maxReadLen := base64.StdEncoding.EncodedLen(nonceLen) + 1
 	body, err := io.ReadAll(newLimitReader(resp.Body, maxReadLen))
 	if err != nil {
 		return nonce{}, fmt.Errorf("%s: %w", errStr, err)

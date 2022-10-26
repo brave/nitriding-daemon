@@ -39,7 +39,7 @@ func getNonceHandler(e *Enclave) http.HandlerFunc {
 		}
 
 		e.nonceCache.Add(nonce.B64())
-		fmt.Fprintf(w, "%s\n", nonce.B64())
+		fmt.Fprintln(w, nonce.B64())
 	}
 }
 
