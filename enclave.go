@@ -38,8 +38,7 @@ const (
 	parentCID       = 3
 	pathNonce       = "/nonce"
 	pathAttestation = "/attestation"
-	pathGetKeys     = "/get-keys"
-	pathPostKeys    = "/post-keys"
+	pathState       = "/state"
 	pathRoot        = "/"
 )
 
@@ -155,11 +154,11 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	m := e.pubSrv.Handler.(*chi.Mux)
 	m.Get(pathAttestation, getAttestationHandler(&e.certFpr))
 	m.Get(pathNonce, getNonceHandler(e))
-	m.Get(pathGetKeys, getKeysHandler(e, time.Now))
+	m.Get(pathState, getStateHandler(e))
 	m.Get(pathRoot, getIndexHandler(e.cfg))
 	// Register enclave-internal HTTP API.
 	m = e.privSrv.Handler.(*chi.Mux)
-	m.Put(pathPostKeys, getSetKeysHandler(e))
+	m.Put(pathState, setStateHandler(e))
 
 	if cfg.Debug {
 		e.pubSrv.Handler.(*chi.Mux).Use(middleware.Logger)

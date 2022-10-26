@@ -14,7 +14,8 @@ const (
 )
 
 var (
-	errFailedReqBody = errors.New("failed to read request body")
+	errFailedReqBody  = errors.New("failed to read request body")
+	errFailedGetState = errors.New("failed to retrieve saved state")
 )
 
 func formatIndexPage(appURL string) string {
@@ -35,10 +36,33 @@ func getIndexHandler(cfg *Config) http.HandlerFunc {
 	}
 }
 
-// getSetKeysHandler returns a handler that lets the enclave application
-// register its key material with nitriding.  The key material can be arbitrary
-// bytes.
-func getSetKeysHandler(e *Enclave) http.HandlerFunc {
+// getStateHandler returns a handler that lets the enclave application retrieve
+// previously-set state.
+func getStateHandler(e *Enclave) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		s, err := e.KeyMaterial()
+		if err != nil {
+			http.Error(w, errFailedGetState.Error(), http.StatusInternalServerError)
+			return
+		}
+		n, err := w.Write(s.([]byte))
+		if err != nil {
+			elog.Printf("Error writing state to client: %v", err)
+			return
+		}
+		expected := len(s.([]byte))
+		if n != expected {
+			elog.Printf("Only wrote %d out of %d-byte state to client.", n, expected)
+			return
+		}
+	}
+}
+
+// setStateHandler returns a handler that lets the enclave application set
+// state that's synchronized with another enclave in case of horizontal
+// scaling.  The state can be arbitrary bytes.
+func setStateHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(newLimitReader(r.Body, maxKeyMaterialLen))
 		if err != nil {
