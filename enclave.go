@@ -39,6 +39,7 @@ const (
 	pathNonce       = "/nonce"
 	pathAttestation = "/attestation"
 	pathState       = "/state"
+	pathSync        = "/sync"
 	pathRoot        = "/"
 )
 
@@ -155,6 +156,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	m.Get(pathAttestation, getAttestationHandler(&e.certFpr))
 	m.Get(pathNonce, getNonceHandler(e))
 	m.Get(pathState, getStateHandler(e))
+	m.Get(pathSync, syncHandler(e))
 	m.Get(pathRoot, getIndexHandler(e.cfg))
 	// Register enclave-internal HTTP API.
 	m = e.privSrv.Handler.(*chi.Mux)

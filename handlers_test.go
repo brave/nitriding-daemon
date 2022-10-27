@@ -8,6 +8,20 @@ import (
 	"testing"
 )
 
+func TestSyncHandler(t *testing.T) {
+	e := createEnclave()
+	h := syncHandler(e)
+	rec := httptest.NewRecorder()
+
+	req, err := http.NewRequest(http.MethodGet, pathSync, nil)
+	if err != nil {
+		t.Fatalf("Failed to create HTTP request: %v", err)
+	}
+	h(rec, req)
+
+	expect(t, rec.Result(), http.StatusBadRequest, errNoAddr.Error())
+}
+
 func TestStateHandlers(t *testing.T) {
 	expected := []byte{1, 2, 3, 4, 5} // The key material that we're setting and retrieving.
 	e := createEnclave()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
 
 const (
@@ -16,6 +17,7 @@ const (
 var (
 	errFailedReqBody  = errors.New("failed to read request body")
 	errFailedGetState = errors.New("failed to retrieve saved state")
+	errNoAddr         = errors.New("parameter 'addr' not found")
 )
 
 func formatIndexPage(appURL string) string {
@@ -33,6 +35,35 @@ func formatIndexPage(appURL string) string {
 func getIndexHandler(cfg *Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, formatIndexPage(cfg.AppURL))
+	}
+}
+
+// syncHandler returns a handler that lets the enclave application trigger
+// state synchronization, which copies the given remote enclave's state into
+// our state.
+func syncHandler(e *Enclave) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		// The 'addr' parameter must have the following form:
+		// https://example.com:8443
+		addrs, ok := q["addr"]
+		if !ok {
+			http.Error(w, errNoAddr.Error(), http.StatusBadRequest)
+			return
+		}
+		addr := addrs[0]
+
+		// Are we dealing with a well-formed URL?
+		if _, err := url.Parse(addr); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if err := RequestKeys(addr, e.KeyMaterial); err != nil {
+			http.Error(w, fmt.Sprintf("failed to synchronize state: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
