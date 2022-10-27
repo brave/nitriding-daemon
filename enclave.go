@@ -177,8 +177,8 @@ func (e *Enclave) Start() error {
 		e.router.Get(pathAttestation, getAttestationHandler(&e.certFpr))
 	}
 	e.router.Get(pathNonce, getNonceHandler(e))
-	e.router.Get(pathKeys, getKeysHandler(e, time.Now))
 	e.router.Get(pathRoot, getIndexHandler(e.cfg))
+	e.router.Post(pathKeys, getKeysHandler(e, time.Now))
 
 	// Tell Go's HTTP library to use SOCKS proxy for both HTTP and HTTPS.
 	if err := os.Setenv("HTTP_PROXY", e.cfg.SOCKSProxy); err != nil {

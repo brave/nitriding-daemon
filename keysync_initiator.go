@@ -141,6 +141,10 @@ func requestAttDoc(addr string, ourAttDoc []byte) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: expected status code %d but got %d", errStr, http.StatusOK, resp.StatusCode)
+	}
+
 	maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
 	body, err := io.ReadAll(newLimitReader(resp.Body, maxReadLen))
 	if err != nil {
