@@ -107,8 +107,8 @@ func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 			return
 		}
 		var encrypted []byte
-		if _, err = box.SealAnonymous(
-			encrypted,
+		if encrypted, err = box.SealAnonymous(
+			nil,
 			jsonKeyMaterial,
 			theirBoxPubKey,
 			cryptoRand.Reader,
