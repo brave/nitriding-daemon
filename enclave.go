@@ -170,9 +170,8 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	return e, nil
 }
 
-// Start starts the Nitro Enclave.  If it bootstraps correctly, this function
-// won't return because it starts an HTTPS server.  If something goes wrong,
-// the function returns an error.
+// Start starts the Nitro Enclave.  If something goes wrong, the function
+// returns an error.
 func (e *Enclave) Start() error {
 	var err error
 	errPrefix := "failed to start Nitro Enclave"
