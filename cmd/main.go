@@ -37,8 +37,10 @@ func main() {
 		l.Fatalf("Failed to create enclave: %v", err)
 	}
 
-	// Start blocks for as long as the enclave is alive.
 	if err := enclave.Start(); err != nil {
 		l.Fatalf("Enclave terminated: %v", err)
 	}
+
+	// Block on this read forever.
+	<-make(chan struct{})
 }
