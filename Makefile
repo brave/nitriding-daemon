@@ -2,6 +2,7 @@
 
 binary = cmd/nitriding
 godeps = *.go go.mod go.sum
+cmddeps = cmd/*.go
 
 all: test lint $(binary)
 
@@ -11,7 +12,7 @@ lint:
 test: $(godeps)
 	@go test -cover ./...
 
-$(binary): $(godeps)
+$(binary): $(godeps) $(cmddeps)
 	make -C cmd/
 
 clean:
