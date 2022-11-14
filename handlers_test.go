@@ -2,9 +2,13 @@ package nitriding
 
 import (
 	"bytes"
+	"crypto/tls"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"testing"
 )
 
@@ -62,4 +66,49 @@ func TestStateHandlers(t *testing.T) {
 	if !bytes.Equal(expected, retrieved) {
 		t.Fatalf("Expected state %q but got %q.", expected, retrieved)
 	}
+}
+
+func TestProxyHandler(t *testing.T) {
+	appPage := "foobar"
+
+	// Nitring acts as a reverse proxy to this Web server.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, appPage)
+	}))
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := defaultCfg
+	c.AppWebSrv = u
+	e, err := NewEnclave(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.revProxy = httputil.NewSingleHostReverseProxy(u)
+	if err := e.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Skip certificate validation because we are using a self-signed
+	// certificate in this test.
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	nitridingSrv := "https://127.0.0.1" + e.pubSrv.Addr
+
+	// Request the enclave's index page.  Nitriding is going to return it.
+	resp, err := http.Get(nitridingSrv + pathRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expect(t, resp, http.StatusOK, indexPage)
+
+	// Request a random page.  Nitriding is going to forwrad the request to our
+	// test Web server.
+	resp, err = http.Get(nitridingSrv + "/foo/bar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expect(t, resp, http.StatusOK, appPage)
 }

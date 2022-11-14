@@ -12,6 +12,8 @@ const (
 	// The maximum length of the key material (in bytes) that enclave
 	// applications can PUT to our HTTP API.
 	maxKeyMaterialLen = 1024 * 1024
+	// The HTML for the enclave's index page.
+	indexPage = "This host runs inside an AWS Nitro Enclave.\n"
 )
 
 var (
@@ -21,7 +23,7 @@ var (
 )
 
 func formatIndexPage(appURL string) string {
-	page := "This host runs inside an AWS Nitro Enclave.\n"
+	page := indexPage
 	if appURL != "" {
 		page += fmt.Sprintf("\nIt runs the following code: %s\n"+
 			"Use the following tool to verify the enclave: "+
@@ -102,5 +104,13 @@ func setStateHandler(e *Enclave) http.HandlerFunc {
 		}
 		e.SetKeyMaterial(body)
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// proxyHandler returns an HTTP handler that proxies HTTP requests to the
+// enclave-internal HTTP server of our enclave application.
+func proxyHandler(e *Enclave) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		e.revProxy.ServeHTTP(w, r)
 	}
 }

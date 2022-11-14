@@ -17,6 +17,8 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -35,12 +37,16 @@ const (
 	// parentCID determines the CID (analogous to an IP address) of the parent
 	// EC2 instance.  According to the AWS docs, it is always 3:
 	// https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-concepts.html
-	parentCID       = 3
-	pathNonce       = "/nonce"
-	pathAttestation = "/attestation"
-	pathState       = "/state"
-	pathSync        = "/sync"
-	pathRoot        = "/"
+	parentCID = 3
+	// The following paths are handled by nitriding.
+	pathRoot        = "/enclave"
+	pathNonce       = "/enclave/nonce"
+	pathAttestation = "/enclave/attestation"
+	pathState       = "/enclave/state"
+	pathSync        = "/enclave/sync"
+	// All other paths are handled by the enclave application's Web server if
+	// it exists.
+	pathProxy = "/*"
 )
 
 var (
@@ -56,6 +62,7 @@ type Enclave struct {
 	sync.RWMutex
 	cfg             *Config
 	pubSrv, privSrv http.Server
+	revProxy        *httputil.ReverseProxy
 	certFpr         [sha256.Size]byte
 	nonceCache      *cache
 	keyMaterial     any
@@ -108,6 +115,14 @@ type Config struct {
 	// is shown on the enclave's index page, as part of instructions on how to
 	// do remote attestation.
 	AppURL string
+
+	// AppWebSrv should be set to the enclave-internal Web server of the
+	// enclave application, e.g., "http://127.0.0.1:8080".  Nitriding acts as a
+	// TLS-terminating reverse proxy and forwards incoming HTTP requests to
+	// this Web server.  Note that this configuration option is only necessary
+	// if the enclave application exposes an HTTP server.  Non-HTTP enclave
+	// applications can ignore this.
+	AppWebSrv *url.URL
 }
 
 // Validate returns an error if required fields in the config are not set.
@@ -151,16 +166,24 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		},
 		nonceCache: newCache(defaultItemExpiry),
 	}
+
 	// Register public HTTP API.
 	m := e.pubSrv.Handler.(*chi.Mux)
 	m.Get(pathAttestation, getAttestationHandler(&e.certFpr))
 	m.Get(pathNonce, getNonceHandler(e))
-	m.Get(pathState, getStateHandler(e))
-	m.Get(pathSync, syncHandler(e))
 	m.Get(pathRoot, getIndexHandler(e.cfg))
 	// Register enclave-internal HTTP API.
 	m = e.privSrv.Handler.(*chi.Mux)
+	m.Get(pathSync, syncHandler(e))
+	m.Get(pathState, getStateHandler(e))
 	m.Put(pathState, setStateHandler(e))
+
+	// Configure our reverse proxy if the enclave application exposes an HTTP
+	// server.
+	if cfg.AppWebSrv != nil {
+		e.revProxy = httputil.NewSingleHostReverseProxy(cfg.AppWebSrv)
+		e.pubSrv.Handler.(*chi.Mux).Handle(pathProxy, proxyHandler(e))
+	}
 
 	if cfg.Debug {
 		e.pubSrv.Handler.(*chi.Mux).Use(middleware.Logger)
@@ -177,8 +200,10 @@ func (e *Enclave) Start() error {
 	errPrefix := "failed to start Nitro Enclave"
 
 	// Set file descriptor limit.  There's no need to exit if this fails.
-	if err = setFdLimit(e.cfg.FdCur, e.cfg.FdMax); err != nil {
-		elog.Printf("Failed to set new file descriptor limit: %s", err)
+	if inEnclave {
+		if err = setFdLimit(e.cfg.FdCur, e.cfg.FdMax); err != nil {
+			elog.Printf("Failed to set new file descriptor limit: %s", err)
+		}
 	}
 
 	// Set up our networking environment which creates a TAP device that
