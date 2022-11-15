@@ -1,11 +1,14 @@
 package nitriding
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 const (
@@ -20,6 +23,7 @@ var (
 	errFailedReqBody  = errors.New("failed to read request body")
 	errFailedGetState = errors.New("failed to retrieve saved state")
 	errNoAddr         = errors.New("parameter 'addr' not found")
+	errHashWrongSize  = errors.New("given hash is of invalid size")
 )
 
 func formatIndexPage(appURL string) string {
@@ -112,5 +116,37 @@ func setStateHandler(e *Enclave) http.HandlerFunc {
 func proxyHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		e.revProxy.ServeHTTP(w, r)
+	}
+}
+
+// keyHandler returns an HTTP handler that allows the enclave application to
+// register a hash over a public key which is going to be included in
+// attestation documents.  This allows clients to tie the attestation document
+// (which acts as the root of trust) to key material that's used by the enclave
+// application.
+func keyHandler(e *Enclave) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Allow an extra byte for the \n.
+		maxReadLen := base64.StdEncoding.EncodedLen(sha256.Size) + 1
+		body, err := io.ReadAll(newLimitReader(r.Body, maxReadLen))
+		if errors.Is(err, errTooMuchToRead) {
+			http.Error(w, errTooMuchToRead.Error(), http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
+		}
+
+		keyHash, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))
+		if err != nil {
+			http.Error(w, errNoBase64.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if len(keyHash) != sha256.Size {
+			http.Error(w, errHashWrongSize.Error(), http.StatusBadRequest)
+			return
+		}
+		copy(e.hashes.appKeyHash[:], keyHash)
 	}
 }

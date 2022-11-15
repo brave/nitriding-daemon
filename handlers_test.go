@@ -2,7 +2,9 @@ package nitriding
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -112,4 +114,46 @@ func TestProxyHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect(t, resp, http.StatusOK, appPage)
+}
+
+func TestKeyHandler(t *testing.T) {
+	e := createEnclave()
+	h := keyHandler(e)
+	validHash := [sha256.Size]byte{}
+	validHashB64 := base64.StdEncoding.EncodeToString(validHash[:])
+
+	// Send invalid Base64.
+	req, _ := http.NewRequest(http.MethodPost, pathKey, bytes.NewBufferString("foo"))
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	expect(t, rec.Result(), http.StatusBadRequest, errNoBase64.Error())
+
+	// Send invalid hash size.
+	req.Body = io.NopCloser(bytes.NewBufferString("AAAAAAAAAAAAAA=="))
+	rec = httptest.NewRecorder()
+	h(rec, req)
+	expect(t, rec.Result(), http.StatusBadRequest, errHashWrongSize.Error())
+
+	// Send too much data.
+	req.Body = io.NopCloser(bytes.NewBufferString("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="))
+	rec = httptest.NewRecorder()
+	h(rec, req)
+	expect(t, rec.Result(), http.StatusBadRequest, errTooMuchToRead.Error())
+
+	// Finally, send a valid, Base64-encoded SHA-256 hash.
+	req.Body = io.NopCloser(bytes.NewBufferString(validHashB64))
+	rec = httptest.NewRecorder()
+	h(rec, req)
+	expect(t, rec.Result(), http.StatusOK, "")
+
+	// Same as above but with an additional \n.
+	req.Body = io.NopCloser(bytes.NewBufferString(validHashB64 + "\n"))
+	rec = httptest.NewRecorder()
+	h(rec, req)
+	expect(t, rec.Result(), http.StatusOK, "")
+
+	// Make sure that our hash was set correctly.
+	if e.hashes.appKeyHash != validHash {
+		t.Fatalf("Application key hash (%x) not as expected (%x).", e.hashes.appKeyHash, validHash)
+	}
 }

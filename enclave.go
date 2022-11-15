@@ -44,6 +44,7 @@ const (
 	pathAttestation = "/enclave/attestation"
 	pathState       = "/enclave/state"
 	pathSync        = "/enclave/sync"
+	pathKey         = "/enclave/key"
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
@@ -63,7 +64,7 @@ type Enclave struct {
 	cfg             *Config
 	pubSrv, privSrv http.Server
 	revProxy        *httputil.ReverseProxy
-	certFpr         [sha256.Size]byte
+	hashes          *AttestationHashes
 	nonceCache      *cache
 	keyMaterial     any
 	stop            chan bool
@@ -166,12 +167,13 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 			Handler: chi.NewRouter(),
 		},
 		nonceCache: newCache(defaultItemExpiry),
+		hashes:     new(AttestationHashes),
 		stop:       make(chan bool),
 	}
 
 	// Register public HTTP API.
 	m := e.pubSrv.Handler.(*chi.Mux)
-	m.Get(pathAttestation, getAttestationHandler(&e.certFpr))
+	m.Get(pathAttestation, getAttestationHandler(e.hashes))
 	m.Get(pathNonce, getNonceHandler(e))
 	m.Get(pathRoot, getIndexHandler(e.cfg))
 	// Register enclave-internal HTTP API.
@@ -179,6 +181,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	m.Get(pathSync, syncHandler(e))
 	m.Get(pathState, getStateHandler(e))
 	m.Put(pathState, setStateHandler(e))
+	m.Post(pathKey, keyHandler(e))
 
 	// Configure our reverse proxy if the enclave application exposes an HTTP
 	// server.
@@ -399,8 +402,9 @@ func (e *Enclave) setCertFingerprint(rawData []byte) error {
 				return err
 			}
 			if !cert.IsCA {
-				e.certFpr = sha256.Sum256(cert.Raw)
-				elog.Printf("Set SHA-256 fingerprint of server's certificate to: %x", e.certFpr[:])
+				e.hashes.tlsKeyHash = sha256.Sum256(cert.Raw)
+				elog.Printf("Set SHA-256 fingerprint of server's certificate to: %x",
+					e.hashes.tlsKeyHash[:])
 				return nil
 			}
 		}

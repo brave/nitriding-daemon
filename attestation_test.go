@@ -1,6 +1,9 @@
 package nitriding
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -31,7 +34,7 @@ func expect(t *testing.T, resp *http.Response, statusCode int, errMsg string) {
 }
 
 func testReq(t *testing.T, req *http.Request, statusCode int, errMsg string) {
-	attestationHandler := getAttestationHandler(&[32]byte{})
+	attestationHandler := getAttestationHandler(&AttestationHashes{})
 	rec := httptest.NewRecorder()
 	attestationHandler(rec, req)
 	expect(t, rec.Result(), statusCode, errMsg)
@@ -82,5 +85,32 @@ func TestArePCRsIdentical(t *testing.T) {
 	pcr2[2] = []byte("foobar")
 	if arePCRsIdentical(pcr1, pcr2) {
 		t.Fatal("Failed to recognize different PCRs as such.")
+	}
+}
+
+func TestAttestationHashes(t *testing.T) {
+	e := createEnclave()
+	appKeyHash := [sha256.Size]byte{}
+
+	// Start the enclave.  This is going to initialize the hash over the HTTPS
+	// certificate.
+	if err := e.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop() //nolint:errcheck
+
+	// Register dummy key material for the other hash to be initialized.
+	rec := httptest.NewRecorder()
+	buf := bytes.NewBufferString(base64.StdEncoding.EncodeToString(appKeyHash[:]))
+	req := httptest.NewRequest(http.MethodPost, pathKey, buf)
+	e.privSrv.Handler.ServeHTTP(rec, req)
+
+	s := e.hashes.Serialize()
+	if len(s) != sha256.Size*2 {
+		t.Fatalf("Expected serialized hashes to be of length %d but got %d.",
+			sha256.Size*2, len(s))
+	}
+	if !bytes.Equal(s[sha256.Size:], appKeyHash[:]) {
+		t.Fatalf("Expected application key hash of %x but got %x.", appKeyHash[:], s[sha256.Size:])
 	}
 }
