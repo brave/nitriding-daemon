@@ -33,11 +33,13 @@ const (
 
 // runNetworking calls the function that sets up our networking environment.
 // If anything fails, we try again after a brief wait period.
-func runNetworking(c *Config) {
+func runNetworking(c *Config, stop chan bool) {
+	var err error
 	for {
-		if err := setupNetworking(c); err != nil {
-			elog.Printf("TAP tunnel to EC2 host failed: %v.  Restarting.", err)
+		if err = setupNetworking(c, stop); err == nil {
+			return
 		}
+		elog.Printf("TAP tunnel to EC2 host failed: %v.  Restarting.", err)
 		time.Sleep(time.Second)
 	}
 }
@@ -51,7 +53,7 @@ func runNetworking(c *Config) {
 //  4. Run DHCP to obtain an IP address.
 //  5. Spawn goroutines to forward traffic between the TAP device and the proxy
 //     running on the host.
-func setupNetworking(c *Config) error {
+func setupNetworking(c *Config, stop chan bool) error {
 	elog.Println("Setting up networking between host and enclave.")
 	defer elog.Println("Tearing down networking between host and enclave.")
 
@@ -103,7 +105,13 @@ func setupNetworking(c *Config) error {
 		}
 	}()
 	elog.Println("Started goroutines to forward traffic.")
-	return <-errCh
+	select {
+	case err := <-errCh:
+		return err
+	case <-stop:
+		elog.Printf("Shutting down networking.")
+		return nil
+	}
 }
 
 func linkUp() error {

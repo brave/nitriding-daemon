@@ -6,12 +6,13 @@ import (
 )
 
 var defaultCfg = &Config{
-	FQDN:    "example.com",
-	Port:    50000,
-	UseACME: false,
-	Debug:   false,
-	FdCur:   1024,
-	FdMax:   4096,
+	FQDN:     "example.com",
+	SockAddr: "/tmp/nitriding.sock",
+	Port:     50000,
+	UseACME:  false,
+	Debug:    false,
+	FdCur:    1024,
+	FdMax:    4096,
 }
 
 func createEnclave() *Enclave {

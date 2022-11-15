@@ -66,6 +66,7 @@ type Enclave struct {
 	certFpr         [sha256.Size]byte
 	nonceCache      *cache
 	keyMaterial     any
+	stop            chan bool
 }
 
 // Config represents the configuration of our enclave service.
@@ -165,6 +166,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 			Handler: chi.NewRouter(),
 		},
 		nonceCache: newCache(defaultItemExpiry),
+		stop:       make(chan bool),
 	}
 
 	// Register public HTTP API.
@@ -208,7 +210,7 @@ func (e *Enclave) Start() error {
 
 	// Set up our networking environment which creates a TAP device that
 	// forwards traffic (via the VSOCK interface) to the EC2 host.
-	go runNetworking(e.cfg)
+	go runNetworking(e.cfg, e.stop)
 
 	// Get an HTTPS certificate.
 	if e.cfg.UseACME {
@@ -224,6 +226,21 @@ func (e *Enclave) Start() error {
 		return fmt.Errorf("%s: %w", errPrefix, err)
 	}
 
+	return nil
+}
+
+// Stop stops the enclave.
+func (e *Enclave) Stop() error {
+	close(e.stop)
+	if err := e.privSrv.Shutdown(context.Background()); err != nil {
+		return err
+	}
+	if err := e.pubSrv.Shutdown(context.Background()); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(e.cfg.SockAddr); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -91,6 +91,7 @@ func TestProxyHandler(t *testing.T) {
 	if err := e.Start(); err != nil {
 		t.Fatal(err)
 	}
+	defer e.Stop() //nolint:errcheck
 
 	// Skip certificate validation because we are using a self-signed
 	// certificate in this test.
