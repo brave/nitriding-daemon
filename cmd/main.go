@@ -12,22 +12,22 @@ import (
 var l = log.New(os.Stderr, "nitriding-cmd: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
 
 func main() {
-	var sockAddr, fqdn, appURL, appWebSrv string
-	var port, hostProxyPort int
+	var fqdn, appURL, appWebSrv string
+	var extPort, intPort, hostProxyPort int
 	var useACME bool
 	var u *url.URL
 	var err error
 
 	flag.StringVar(&fqdn, "fqdn", "",
 		"FQDN of the enclave application (e.g., \"example.com\").")
-	flag.StringVar(&sockAddr, "sockaddr", "/tmp/nitriding.sock",
-		"Path to Unix domain socket for enclave-internal IPC.")
 	flag.StringVar(&appURL, "appurl", "",
 		"Code repository of the enclave application (e.g., \"github.com/foo/bar\").")
 	flag.StringVar(&appWebSrv, "appwebsrv", "",
-		"Enclave-internal HTTP server of the enclave application (e.g., \"http://127.0.0.1:8080\").")
-	flag.IntVar(&port, "port", 8443,
+		"Enclave-internal HTTP server of the enclave application (e.g., \"http://127.0.0.1:8081\").")
+	flag.IntVar(&extPort, "extport", 8443,
 		"Nitriding's VSOCK-facing HTTPS port.  Must match port forwarding rules on EC2 host.")
+	flag.IntVar(&intPort, "intport", 8080,
+		"Nitriding's enclave-internal HTTP port.  Only used by the enclave application.")
 	flag.IntVar(&hostProxyPort, "host-proxy-port", 1024,
 		"Port of proxy application running on EC2 host.")
 	flag.BoolVar(&useACME, "acme", false,
@@ -48,10 +48,10 @@ func main() {
 	enclave, err := nitriding.NewEnclave(
 		&nitriding.Config{
 			FQDN:          fqdn,
-			Port:          port,
+			ExtPort:       extPort,
+			IntPort:       intPort,
 			HostProxyPort: hostProxyPort,
 			UseACME:       useACME,
-			SockAddr:      sockAddr,
 			AppURL:        appURL,
 			AppWebSrv:     u,
 		},

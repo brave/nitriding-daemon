@@ -78,19 +78,19 @@ type Config struct {
 	// is required.
 	FQDN string
 
-	// Port contains the TCP port that the Web server should listen on, e.g.
-	// 8443.  Note that the Web server listens for this port on the private
-	// VSOCK interface.  This is not an Internet-facing port.  This field is
-	// required.
-	Port int
+	// ExtPort contains the VSOCK-facing TCP port that the Web server should
+	// listen on, e.g.  8443.  This port is not *directly* reachable by the
+	// Internet but the EC2 host's proxy *does* forward Internet traffic to
+	// this port.  This field is required.
+	ExtPort int
+
+	// IntPort contains the enclave-internal TCP port of the Web server that
+	// provides an HTTP API to the enclave application.
+	IntPort int
 
 	// HostProxyPort indicates the TCP port of the proxy application running on
 	// the EC2 host.  If unset, the default of 1024 is goint to be used.
 	HostProxyPort int
-
-	// SockAddr indicates the file system path to the Unix domain socket that
-	// enclave applications can use to talk to nitriding's HTTP API.
-	SockAddr string
 
 	// UseACME must be set to true if you want your enclave application to
 	// request a Let's Encrypt-signed certificate.  If this is set to false,
@@ -133,7 +133,7 @@ func (c *Config) Validate() error {
 	if c.FQDN == "" {
 		return errCfgMissingFQDN
 	}
-	if c.Port == 0 {
+	if c.ExtPort == 0 {
 		return errCfgMissingPort
 	}
 	return nil
@@ -161,10 +161,11 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	e := &Enclave{
 		cfg: cfg,
 		pubSrv: http.Server{
-			Addr:    fmt.Sprintf(":%d", cfg.Port),
+			Addr:    fmt.Sprintf(":%d", cfg.ExtPort),
 			Handler: chi.NewRouter(),
 		},
 		privSrv: http.Server{
+			Addr:    fmt.Sprintf("127.0.0.1:%d", cfg.IntPort),
 			Handler: chi.NewRouter(),
 		},
 		nonceCache: newCache(defaultItemExpiry),
@@ -244,22 +245,15 @@ func (e *Enclave) Stop() error {
 	if err := e.pubSrv.Shutdown(context.Background()); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(e.cfg.SockAddr); err != nil {
-		return err
-	}
 	return nil
 }
 
 // startWebServers starts both our public-facing and our enclave-internal Web
 // server in a goroutine.
 func startWebServers(e *Enclave) error {
-	elog.Printf("Starting public (%s) and private (%s) Web server.", e.pubSrv.Addr, e.cfg.SockAddr)
+	elog.Printf("Starting public (%s) and private (%s) Web server.", e.pubSrv.Addr, e.privSrv.Addr)
 
-	l, err := createUnixSocket(e.cfg.SockAddr)
-	if err != nil {
-		return fmt.Errorf("failed to create unix domain socket: %w", err)
-	}
-	go e.privSrv.Serve(l) //nolint:errcheck
+	go e.privSrv.ListenAndServe() //nolint:errcheck
 
 	// Don't launch our Internet-facing Web server until the application
 	// signalled that it's ready.

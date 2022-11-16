@@ -6,13 +6,13 @@ import (
 )
 
 var defaultCfg = &Config{
-	FQDN:     "example.com",
-	SockAddr: "/tmp/nitriding.sock",
-	Port:     50000,
-	UseACME:  false,
-	Debug:    false,
-	FdCur:    1024,
-	FdMax:    4096,
+	FQDN:    "example.com",
+	ExtPort: 50000,
+	IntPort: 50001,
+	UseACME: false,
+	Debug:   false,
+	FdCur:   1024,
+	FdMax:   4096,
 }
 
 func createEnclave() *Enclave {
@@ -38,7 +38,7 @@ func TestValidateConfig(t *testing.T) {
 	}
 
 	// Set the last required field.
-	c.Port = 1
+	c.ExtPort = 1
 	if err = c.Validate(); err != nil {
 		t.Fatalf("Validation of valid config returned an error.")
 	}
