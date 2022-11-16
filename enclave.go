@@ -213,6 +213,9 @@ func (e *Enclave) Start() error {
 		if err = setFdLimit(e.cfg.FdCur, e.cfg.FdMax); err != nil {
 			elog.Printf("Failed to set new file descriptor limit: %s", err)
 		}
+		if err = assignLoAddr(); err != nil {
+			return fmt.Errorf("%s: failed to assign loopback address: %w", errPrefix, err)
+		}
 	}
 
 	// Set up our networking environment which creates a TAP device that
