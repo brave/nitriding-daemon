@@ -98,6 +98,7 @@ func TestAttestationHashes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Stop() //nolint:errcheck
+	signalReady(t, e)
 
 	// Register dummy key material for the other hash to be initialized.
 	rec := httptest.NewRecorder()

@@ -150,3 +150,13 @@ func keyHandler(e *Enclave) http.HandlerFunc {
 		copy(e.hashes.appKeyHash[:], keyHash)
 	}
 }
+
+// readyHandler returns an HTTP handler that lets the enclave application
+// signal that it's ready, instructing nitriding to start its Internet-facing
+// Web server.
+func readyHandler(e *Enclave) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		close(e.ready)
+		w.WriteHeader(http.StatusOK)
+	}
+}

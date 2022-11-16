@@ -45,6 +45,7 @@ const (
 	pathState       = "/enclave/state"
 	pathSync        = "/enclave/sync"
 	pathKey         = "/enclave/key"
+	pathReady       = "/enclave/ready"
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
@@ -67,7 +68,7 @@ type Enclave struct {
 	hashes          *AttestationHashes
 	nonceCache      *cache
 	keyMaterial     any
-	stop            chan bool
+	ready, stop     chan bool
 }
 
 // Config represents the configuration of our enclave service.
@@ -169,6 +170,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		nonceCache: newCache(defaultItemExpiry),
 		hashes:     new(AttestationHashes),
 		stop:       make(chan bool),
+		ready:      make(chan bool),
 	}
 
 	// Register public HTTP API.
@@ -180,6 +182,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	m = e.privSrv.Handler.(*chi.Mux)
 	m.Get(pathSync, syncHandler(e))
 	m.Get(pathState, getStateHandler(e))
+	m.Get(pathReady, readyHandler(e))
 	m.Put(pathState, setStateHandler(e))
 	m.Post(pathKey, keyHandler(e))
 
@@ -256,8 +259,15 @@ func startWebServers(e *Enclave) error {
 	if err != nil {
 		return fmt.Errorf("failed to create unix domain socket: %w", err)
 	}
-	go e.privSrv.Serve(l)                 //nolint:errcheck
-	go e.pubSrv.ListenAndServeTLS("", "") //nolint:errcheck
+	go e.privSrv.Serve(l) //nolint:errcheck
+
+	// Don't launch our Internet-facing Web server until the application
+	// signalled that it's ready.
+	go func() {
+		<-e.ready
+		elog.Println("Application signalled that it's ready.  Starting public Web server.")
+		e.pubSrv.ListenAndServeTLS("", "") //nolint:errcheck
+	}()
 
 	return nil
 }

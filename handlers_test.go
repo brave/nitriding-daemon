@@ -11,8 +11,20 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 )
+
+// signalReady signals to the enclave-internal Web server that we're ready,
+// instructing it to spin up its Internet-facing Web server.
+func signalReady(t *testing.T, e *Enclave) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, pathReady, nil)
+	e.privSrv.Handler.ServeHTTP(rec, req)
+	expect(t, rec.Result(), http.StatusOK, "")
+}
 
 func TestSyncHandler(t *testing.T) {
 	e := createEnclave()
@@ -94,6 +106,7 @@ func TestProxyHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Stop() //nolint:errcheck
+	signalReady(t, e)
 
 	// Skip certificate validation because we are using a self-signed
 	// certificate in this test.
@@ -155,5 +168,36 @@ func TestKeyHandler(t *testing.T) {
 	// Make sure that our hash was set correctly.
 	if e.hashes.appKeyHash != validHash {
 		t.Fatalf("Application key hash (%x) not as expected (%x).", e.hashes.appKeyHash, validHash)
+	}
+}
+
+func TestReadyHandler(t *testing.T) {
+	e := createEnclave()
+	if err := e.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop() //nolint:errcheck
+
+	// Check if the Internet-facing Web server is running.
+	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.Port)
+	_, err := http.Get(nitridingSrv + pathRoot)
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Fatal("Expected 'connection refused'.")
+	}
+
+	signalReady(t, e)
+	// There's no straightforward way to register a callback for when a Web
+	// server has started because ListenAndServeTLS blocks for as long as the
+	// server is alive.  Let's wait briefly to give the Web server enough time
+	// to start.  An ugly test is better than no test.
+	time.Sleep(100 * time.Millisecond)
+
+	// Check again.  It should be running this time.
+	resp, err := http.Get(nitridingSrv + pathRoot)
+	if err != nil {
+		t.Fatalf("Expected no error but got %v.", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected status code %d but got %d.", http.StatusOK, resp.StatusCode)
 	}
 }
