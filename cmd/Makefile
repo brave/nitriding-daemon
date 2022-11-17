@@ -1,7 +1,7 @@
 .PHONY: all lint clean
 
 binary = nitriding
-godeps = *.go
+godeps = *.go ../*.go ../go.mod ../go.sum
 
 all: lint $(binary)
 
@@ -12,4 +12,4 @@ $(binary): $(godeps)
 	go build -o $(binary)
 
 clean:
-	rm $(binary)
+	rm -f $(binary)
