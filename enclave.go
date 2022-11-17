@@ -44,7 +44,7 @@ const (
 	pathAttestation = "/enclave/attestation"
 	pathState       = "/enclave/state"
 	pathSync        = "/enclave/sync"
-	pathKey         = "/enclave/key"
+	pathHash        = "/enclave/hash"
 	pathReady       = "/enclave/ready"
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
@@ -185,7 +185,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	m.Get(pathState, getStateHandler(e))
 	m.Get(pathReady, readyHandler(e))
 	m.Put(pathState, setStateHandler(e))
-	m.Post(pathKey, keyHandler(e))
+	m.Post(pathHash, keyHandler(e))
 
 	// Configure our reverse proxy if the enclave application exposes an HTTP
 	// server.

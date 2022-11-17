@@ -103,7 +103,7 @@ func TestAttestationHashes(t *testing.T) {
 	// Register dummy key material for the other hash to be initialized.
 	rec := httptest.NewRecorder()
 	buf := bytes.NewBufferString(base64.StdEncoding.EncodeToString(appKeyHash[:]))
-	req := httptest.NewRequest(http.MethodPost, pathKey, buf)
+	req := httptest.NewRequest(http.MethodPost, pathHash, buf)
 	e.privSrv.Handler.ServeHTTP(rec, req)
 
 	s := e.hashes.Serialize()

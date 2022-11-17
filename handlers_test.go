@@ -136,7 +136,7 @@ func TestKeyHandler(t *testing.T) {
 	validHashB64 := base64.StdEncoding.EncodeToString(validHash[:])
 
 	// Send invalid Base64.
-	req, _ := http.NewRequest(http.MethodPost, pathKey, bytes.NewBufferString("foo"))
+	req, _ := http.NewRequest(http.MethodPost, pathHash, bytes.NewBufferString("foo"))
 	rec := httptest.NewRecorder()
 	h(rec, req)
 	expect(t, rec.Result(), http.StatusBadRequest, errNoBase64.Error())
