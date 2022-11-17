@@ -360,14 +360,7 @@ func (e *Enclave) setupAcme() error {
 		Prompt:     autocert.AcceptTOS,
 		HostPolicy: autocert.HostWhitelist([]string{e.cfg.FQDN}...),
 	}
-
-	errChan := make(chan error)
-	go listenHTTP01(errChan, &certManager)
-	if err := <-errChan; err != nil {
-		return err
-	}
-
-	e.pubSrv.TLSConfig = &tls.Config{GetCertificate: certManager.GetCertificate}
+	e.pubSrv.TLSConfig = certManager.TLSConfig()
 
 	go func() {
 		// Wait until the HTTP-01 listener returned and then check if our new
