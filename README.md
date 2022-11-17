@@ -2,95 +2,82 @@
 
 [![GoDoc](https://pkg.go.dev/badge/github.com/brave/nitriding?utm_source=godoc)](https://pkg.go.dev/github.com/brave/nitriding)
 
-This package helps with building Go-based Web applications on top of AWS Nitro
-Enclaves.  The package provides the following features:
+This Go tool kit makes it possible to run your application inside an
+[AWS Nitro Enclave](https://aws.amazon.com/ec2/nitro/nitro-enclaves/).
+Let's assume that you built a Web service in Rust.  You can now use nitriding to
+move your Rust code into a secure enclave, making it possible for your users to
+remotely verify that you are in fact running the code that you claim to run.
+Nitriding provides the following features:
 
-1. Automatically obtains an HTTPS certificate (either self-signed or via [Let's
-   Encrypt](https://letsencrypt.org)) for clients to securely connect to your
-   enclave over the Internet.
+* Automatically obtains an HTTPS certificate (either self-signed or via
+  [Let's Encrypt](https://letsencrypt.org))
+  for clients to securely connect to your enclave over the Internet.  Nitriding
+  can act as a TLS-terminating reverse HTTP proxy for your application, so your
+  application does not have to deal with obtaining certificates.
 
-2. Automatically exposes an HTTPS endpoint for remote attestation.  After
-   having audited your enclave's source code, your users can conveniently
-   verify the enclave by using a tool like
-   [verify-enclave](https://github.com/brave-experiments/verify-enclave)
-   and running:
+* Automatically exposes an HTTPS endpoint for remote attestation.  After having
+  audited your enclave's source code, your users can conveniently verify the
+  enclave's image by using a tool like
+  [verify-enclave](https://github.com/brave-experiments/verify-enclave)
+  and running:
 
    ```
-   make verify CODE=/path/to/code/ ENCLAVE=https://example.com/attest
+   make verify CODE=/path/to/code/ ENCLAVE=https://enclave.com/enclave/attestation
    ```
 
-3. Provides an API for the enclave application to securely share confidential
-   key material with an identical, remote enclave.
+* Are you building an application that uses a protocol other than HTTP?  If so,
+  nitriding makes it possible to register a hash over your application's public
+  key material which is subsequently included in the
+  [attestation document](https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-concepts.html#term-attestdoc).
+  This allows your users to verify that their connection is securely terminated
+  inside the enclave, regardless of the protocol that you are using.
 
-4. Starts a proxy component that transparently translates between IP and VSOCK,
-   so you can write IP-based networking code without having to worry about
-   the enclave's constrained VSOCK interface.
+* Provides an API to scale enclave applications horizontally while synchronizing
+  state between enclaves.
 
-5. Automatically initializes the enclave's entropy pool using the Nitro
-   hypervisor.
+* AWS Nitro Enclaves only provide a highly constrained
+  [VSOCK channel](https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-concepts.html#term-socket)
+  between the enclave and its host.  Nitriding creates TAP interface inside the
+  enclave, allowing your application to transparently access the Internet
+  without having to worry about VSOCK, port forwarding, or tunneling.
+
+* Automatically initializes the enclave's entropy pool using the Nitro
+  hypervisor.
 
 To learn more about nitriding's trust assumptions, architecture, and build
 system, take a look at our [research paper](https://arxiv.org/abs/2206.04123).
 
-## Configuration
+## Usage
 
-Nitriding's
-[configuration object](https://pkg.go.dev/github.com/brave-experiments/nitriding#Config)
-contains comments that explain the purpose of each variable.
+To use nitriding, the following steps are necessary:
 
-## Example
+1. Make sure that your enclave application supports
+   [reproducible builds](https://reproducible-builds.org);
+   otherwise, users won't be able to verify your enclave image.
 
-Use the following "hello world" example to get started.  The program
-instantiates a new Web server that's listening on port 8443, for the domain
-example.com.  It also registers an HTTP handler for the path `/hello-world`
-which, when accessed, simply responds with the string "hello world".
+2. Set up
+   [this proxy application](https://github.com/containers/gvisor-tap-vsock/tree/main/cmd/gvproxy)
+   on the EC2 host.
 
-Note that in order for this example to work, you need to set up two programs on
-the parent EC2 instance:
+3. Bundle your application and nitriding together in a Dockerfile.  The
+   nitriding stand-alone executable must be invoked first, followed by your
+   application.  To build the nitriding executable, run `make cmd/nitriding`.
+   (Then, run `./cmd/nitriding -help` to see a list of command line options.)
+   For reproducible Docker images, we recommend
+   [kaniko](https://github.com/GoogleContainerTools/kaniko)
+   and
+   [ko](https://github.com/ko-build/ko) (for Go applications only).
 
-1. [viproxy](https://github.com/brave/viproxy) by running:
+4. Once your application is done bootstrapping, it must let nitriding know, so
+   it can start the Internet-facing Web server that handles remote attestation
+   and other tasks.  To do so, the application must issue an HTTP GET request to
+   `http://127.0.0.1:8080/enclave/ready`.  The handler ignores URL parameters
+   and responds with a status code 200 if the request succeeded.  Note that the
+   port in this example, 8080, is controlled by nitriding's `-intport` command
+   line flag.
 
-   ```bash
-   export CID=5 # The CID you assigned when running "nitro-cli run-enclave --enclave-cid X ...".
-   export IN_ADDRS=":8443,:80,3:80"
-   export OUT_ADDRS="${CID}:8443,${CID}:80,127.0.0.1:1080"
-   viproxy
-   ```
-
-2. A SOCKS proxy, e.g.
-   [this one](https://github.com/brave-intl/bat-go/tree/nitro-utils/nitro-shim/tools/socksproxy).
-
-That said, here is the enclave application:
-
-```golang
-package main
-
-import (
-	"fmt"
-	"log"
-	"net/http"
-
-	"github.com/brave/nitriding"
-)
-
-func helloWorldHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "hello world")
-}
-
-func main() {
-	enclave := nitriding.NewEnclave(
-		&nitriding.Config{
-			FQDN:    "example.com",
-			Port:    8443,
-			UseACME: true,
-		},
-	)
-	enclave.AddRoute(http.MethodGet, "/hello-world", helloWorldHandler)
-	if err := enclave.Start(); err != nil {
-		log.Fatalf("Enclave terminated: %v", err)
-	}
-}
-```
+Take a look at [this example application](example/) to learn how nitriding works
+in practice.
 
 ## Development
 
@@ -103,3 +90,4 @@ make
 ## More documentation
 
 * [System architecture](doc/architecture.md)
+* [Example application](example/)
