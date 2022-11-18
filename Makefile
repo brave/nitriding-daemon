@@ -1,8 +1,7 @@
 .PHONY: all test lint clean
 
 binary = cmd/nitriding
-godeps = *.go go.mod go.sum
-cmddeps = cmd/*.go
+godeps = *.go go.mod go.sum cmd/*.go
 
 all: test lint $(binary)
 
@@ -12,7 +11,7 @@ lint:
 test: $(godeps)
 	@go test -cover ./...
 
-$(binary): $(godeps) $(cmddeps)
+$(binary): $(godeps)
 	make -C cmd/
 
 clean:
