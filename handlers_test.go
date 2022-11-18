@@ -24,6 +24,11 @@ func signalReady(t *testing.T, e *Enclave) {
 	req := httptest.NewRequest(http.MethodGet, pathReady, nil)
 	e.privSrv.Handler.ServeHTTP(rec, req)
 	expect(t, rec.Result(), http.StatusOK, "")
+	// There's no straightforward way to register a callback for when a Web
+	// server has started because ListenAndServeTLS blocks for as long as the
+	// server is alive.  Let's wait briefly to give the Web server enough time
+	// to start.  An ugly test is better than no test.
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestSyncHandler(t *testing.T) {
@@ -184,13 +189,7 @@ func TestReadyHandler(t *testing.T) {
 	if !strings.Contains(err.Error(), "connection refused") {
 		t.Fatal("Expected 'connection refused'.")
 	}
-
 	signalReady(t, e)
-	// There's no straightforward way to register a callback for when a Web
-	// server has started because ListenAndServeTLS blocks for as long as the
-	// server is alive.  Let's wait briefly to give the Web server enough time
-	// to start.  An ugly test is better than no test.
-	time.Sleep(100 * time.Millisecond)
 
 	// Check again.  It should be running this time.
 	resp, err := http.Get(nitridingSrv + pathRoot)
