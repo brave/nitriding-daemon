@@ -176,16 +176,18 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 
 	// Register public HTTP API.
 	m := e.pubSrv.Handler.(*chi.Mux)
-	m.Get(pathAttestation, getAttestationHandler(e.hashes))
-	m.Get(pathNonce, getNonceHandler(e))
-	m.Get(pathRoot, getIndexHandler(e.cfg))
+	m.Get(pathAttestation, attestationHandler(e.hashes))
+	m.Get(pathNonce, nonceHandler(e))
+	m.Get(pathRoot, rootHandler(e.cfg))
+	m.Post(pathSync, respSyncHandler(e, time.Now))
+
 	// Register enclave-internal HTTP API.
 	m = e.privSrv.Handler.(*chi.Mux)
-	m.Get(pathSync, syncHandler(e))
-	m.Get(pathState, getStateHandler(e))
+	m.Get(pathSync, reqSyncHandler(e))
 	m.Get(pathReady, readyHandler(e))
-	m.Put(pathState, setStateHandler(e))
-	m.Post(pathHash, keyHandler(e))
+	m.Get(pathState, getStateHandler(e))
+	m.Put(pathState, putStateHandler(e))
+	m.Post(pathHash, hashHandler(e))
 
 	// Configure our reverse proxy if the enclave application exposes an HTTP
 	// server.

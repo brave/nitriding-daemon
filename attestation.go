@@ -49,13 +49,12 @@ func (a *AttestationHashes) Serialize() []byte {
 	return append(a.tlsKeyHash[:], a.appKeyHash[:]...)
 }
 
-// getAttestationHandler takes as input a SHA-256 hash over an HTTPS
-// certificate and returns a HandlerFunc.  This HandlerFunc expects a nonce in
-// the URL query parameters and subsequently asks its hypervisor for an
-// attestation document that contains both the nonce and the certificate hash.
-// The resulting Base64-encoded attestation document is then returned to the
-// requester.
-func getAttestationHandler(hashes *AttestationHashes) http.HandlerFunc {
+// attestationHandler takes as input an AttestationHashes struct and returns a
+// HandlerFunc.  This HandlerFunc expects a nonce in the URL query parameters
+// and subsequently asks its hypervisor for an attestation document that
+// contains both the nonce and the hashes in the given struct.  The resulting
+// Base64-encoded attestation document is then returned to the requester.
+func attestationHandler(hashes *AttestationHashes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, errMethodNotGET, http.StatusMethodNotAllowed)

@@ -36,18 +36,18 @@ func formatIndexPage(appURL string) string {
 	return page
 }
 
-// getIndexHandler returns an index handler that informs the visitor that this
-// host runs inside an enclave.
-func getIndexHandler(cfg *Config) http.HandlerFunc {
+// rootHandler returns a handler that informs the visitor that this host runs
+// inside an enclave.  This is useful for testing.
+func rootHandler(cfg *Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, formatIndexPage(cfg.AppURL))
 	}
 }
 
-// syncHandler returns a handler that lets the enclave application trigger
+// reqSyncHandler returns a handler that lets the enclave application request
 // state synchronization, which copies the given remote enclave's state into
 // our state.
-func syncHandler(e *Enclave) http.HandlerFunc {
+func reqSyncHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		// The 'addr' parameter must have the following form:
@@ -96,10 +96,10 @@ func getStateHandler(e *Enclave) http.HandlerFunc {
 	}
 }
 
-// setStateHandler returns a handler that lets the enclave application set
+// putStateHandler returns a handler that lets the enclave application set
 // state that's synchronized with another enclave in case of horizontal
 // scaling.  The state can be arbitrary bytes.
-func setStateHandler(e *Enclave) http.HandlerFunc {
+func putStateHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(newLimitReader(r.Body, maxKeyMaterialLen))
 		if err != nil {
@@ -119,12 +119,12 @@ func proxyHandler(e *Enclave) http.HandlerFunc {
 	}
 }
 
-// keyHandler returns an HTTP handler that allows the enclave application to
+// hashHandler returns an HTTP handler that allows the enclave application to
 // register a hash over a public key which is going to be included in
 // attestation documents.  This allows clients to tie the attestation document
 // (which acts as the root of trust) to key material that's used by the enclave
 // application.
-func keyHandler(e *Enclave) http.HandlerFunc {
+func hashHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Allow an extra byte for the \n.
 		maxReadLen := base64.StdEncoding.EncodedLen(sha256.Size) + 1

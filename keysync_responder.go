@@ -28,9 +28,9 @@ var (
 
 type timeFunc func() time.Time
 
-// getNonceHandler returns a HandlerFunc that creates a new nonce and returns
-// it to the client.
-func getNonceHandler(e *Enclave) http.HandlerFunc {
+// nonceHandler returns a HandlerFunc that creates a new nonce and returns it
+// to the client.
+func nonceHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nonce, err := newNonce()
 		if err != nil {
@@ -43,9 +43,9 @@ func getNonceHandler(e *Enclave) http.HandlerFunc {
 	}
 }
 
-// getKeysHandler returns a HandlerFunc that shares our secret key material
+// respSyncHandler returns a HandlerFunc that shares our secret key material
 // with the requesting enclave -- after authentication, of course.
-func getKeysHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
+func respSyncHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var ourNonce, theirNonce nonce
 

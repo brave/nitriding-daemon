@@ -28,7 +28,7 @@ func signalReady(t *testing.T, e *Enclave) {
 
 func TestSyncHandler(t *testing.T) {
 	e := createEnclave()
-	h := syncHandler(e)
+	h := reqSyncHandler(e)
 	rec := httptest.NewRecorder()
 
 	req, err := http.NewRequest(http.MethodGet, pathSync, nil)
@@ -43,7 +43,7 @@ func TestSyncHandler(t *testing.T) {
 func TestStateHandlers(t *testing.T) {
 	expected := []byte{1, 2, 3, 4, 5} // The key material that we're setting and retrieving.
 	e := createEnclave()
-	setHandler := setStateHandler(e)
+	setHandler := putStateHandler(e)
 	getHandler := getStateHandler(e)
 	rec := httptest.NewRecorder()
 	req, err := http.NewRequest(http.MethodPut, pathState, bytes.NewReader(expected))
@@ -129,9 +129,9 @@ func TestProxyHandler(t *testing.T) {
 	expect(t, resp, http.StatusOK, appPage)
 }
 
-func TestKeyHandler(t *testing.T) {
+func TestHashHandler(t *testing.T) {
 	e := createEnclave()
-	h := keyHandler(e)
+	h := hashHandler(e)
 	validHash := [sha256.Size]byte{}
 	validHashB64 := base64.StdEncoding.EncodeToString(validHash[:])
 

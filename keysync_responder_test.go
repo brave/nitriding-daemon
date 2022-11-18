@@ -25,7 +25,7 @@ func queryHandler(handler http.HandlerFunc, path string, reader io.Reader) *http
 
 func TestNonceHandler(t *testing.T) {
 	enclave := createEnclave()
-	res := queryHandler(getNonceHandler(enclave), pathNonce, bytes.NewReader([]byte{}))
+	res := queryHandler(nonceHandler(enclave), pathNonce, bytes.NewReader([]byte{}))
 
 	// Did the operation succeed?
 	if res.StatusCode != http.StatusOK {
@@ -57,7 +57,7 @@ func TestNonceHandlerIfErr(t *testing.T) {
 		cryptoRead = rand.Read
 	}()
 
-	res := queryHandler(getNonceHandler(createEnclave()), pathNonce, bytes.NewReader([]byte{}))
+	res := queryHandler(nonceHandler(createEnclave()), pathNonce, bytes.NewReader([]byte{}))
 
 	// Did the operation fail?
 	if res.StatusCode != http.StatusInternalServerError {
@@ -72,20 +72,20 @@ func TestNonceHandlerIfErr(t *testing.T) {
 	}
 }
 
-func TestKeysHandlerForBadReqs(t *testing.T) {
+func TestRespSyncHandlerForBadReqs(t *testing.T) {
 	var res *http.Response
 	enclave := createEnclave()
 
 	// Send non-Base64 bogus data.
-	res = queryHandler(getKeysHandler(enclave, time.Now), pathState, strings.NewReader("foobar!"))
+	res = queryHandler(respSyncHandler(enclave, time.Now), pathSync, strings.NewReader("foobar!"))
 	expect(t, res, http.StatusInternalServerError, errNoBase64.Error())
 
 	// Send Base64-encoded bogus data.
-	res = queryHandler(getKeysHandler(enclave, time.Now), pathState, strings.NewReader("Zm9vYmFyCg=="))
+	res = queryHandler(respSyncHandler(enclave, time.Now), pathSync, strings.NewReader("Zm9vYmFyCg=="))
 	expect(t, res, http.StatusUnauthorized, errFailedVerify.Error())
 }
 
-func TestKeysHandler(t *testing.T) {
+func TestRespSyncHandler(t *testing.T) {
 	var res *http.Response
 	enclave := createEnclave()
 	enclave.nonceCache.Add(initAttInfo.nonce.B64())
@@ -96,20 +96,20 @@ func TestKeysHandler(t *testing.T) {
 	}
 	currentTime = func() time.Time { return initAttInfo.attDocTime }
 
-	res = queryHandler(getKeysHandler(enclave, time.Now), pathState, strings.NewReader(initAttInfo.attDoc))
+	res = queryHandler(respSyncHandler(enclave, time.Now), pathSync, strings.NewReader(initAttInfo.attDoc))
 	// On a non-enclave platform, the responder code will get as far as to
 	// request its attestation document.
 	expect(t, res, http.StatusInternalServerError, errFailedAttestation)
 }
 
-func TestKeysHandlerDoS(t *testing.T) {
+func TestRespSyncHandlerDoS(t *testing.T) {
 	var res *http.Response
 	enclave := createEnclave()
 
 	// Send more data than the handler should be willing to read.
 	maxSize := base64.StdEncoding.EncodedLen(maxAttDocLen)
 	body := make([]byte, maxSize+1)
-	res = queryHandler(getKeysHandler(enclave, time.Now), pathState, bytes.NewReader(body))
+	res = queryHandler(respSyncHandler(enclave, time.Now), pathSync, bytes.NewReader(body))
 	expect(t, res, http.StatusInternalServerError, errFailedRespBody.Error())
 }
 
