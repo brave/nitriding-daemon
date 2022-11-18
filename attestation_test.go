@@ -90,7 +90,7 @@ func TestArePCRsIdentical(t *testing.T) {
 
 func TestAttestationHashes(t *testing.T) {
 	e := createEnclave()
-	appKeyHash := [sha256.Size]byte{}
+	appKeyHash := [sha256.Size]byte{1, 2, 3, 4, 5}
 
 	// Start the enclave.  This is going to initialize the hash over the HTTPS
 	// certificate.
