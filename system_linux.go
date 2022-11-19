@@ -6,13 +6,10 @@ import (
 	"github.com/milosgajdos/tenus"
 )
 
-// assignLoAddr assigns an IP address to the loopback interface, which is
-// necessary because Nitro enclaves don't do that out-of-the-box.  We need the
-// loopback interface because we run a simple TCP proxy that listens on
-// 127.0.0.1:1080 and converts AF_INET to AF_VSOCK.
-func assignLoAddr() error {
-	addrStr := "127.0.0.1/8"
-	l, err := tenus.NewLinkFrom("lo")
+// assignAddrToIface assigns the given IP address (in CIDR notation) to the
+// given network interface.
+func assignAddrToIface(addrStr, iface string) error {
+	l, err := tenus.NewLinkFrom(iface)
 	if err != nil {
 		return err
 	}

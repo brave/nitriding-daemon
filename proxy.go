@@ -9,8 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"os/exec"
 	"time"
 
 	"github.com/containers/gvisor-tap-vsock/pkg/transport"
@@ -25,8 +23,6 @@ var (
 )
 
 const (
-	// iface indicates the name of our enclave-internal TAP device.
-	iface = "tap0"
 	// mac indicates the MAC address of the enclave.
 	mac = "5a:94:ef:e4:0c:ee"
 )
@@ -50,8 +46,7 @@ func runNetworking(c *Config, stop chan bool) {
 //  1. Creates a TAP device.
 //  2. Set up networking links.
 //  3. Establish a connection with the proxy running on the host.
-//  4. Run DHCP to obtain an IP address.
-//  5. Spawn goroutines to forward traffic between the TAP device and the proxy
+//  4. Spawn goroutines to forward traffic between the TAP device and the proxy
 //     running on the host.
 func setupNetworking(c *Config, stop chan bool) error {
 	elog.Println("Setting up networking between host and enclave.")
@@ -79,7 +74,7 @@ func setupNetworking(c *Config, stop chan bool) error {
 	tap, err := water.New(water.Config{
 		DeviceType: water.TAP,
 		PlatformSpecificParams: water.PlatformSpecificParams{
-			Name:       iface,
+			Name:       ifaceTap,
 			MultiQueue: true,
 		},
 	})
@@ -89,21 +84,21 @@ func setupNetworking(c *Config, stop chan bool) error {
 	defer tap.Close()
 	elog.Println("Created TAP device.")
 
+	// Assign an IP address to our freshly creates interface.
+	if err = assignAddrToIface(addrTap, ifaceTap); err != nil {
+		return fmt.Errorf("failed to assign tap address: %w", err)
+	}
+
 	// Set up networking links.
 	if err := linkUp(); err != nil {
 		return fmt.Errorf("failed to set MAC address: %w", err)
 	}
 	elog.Println("Created networking link.")
 
-	// Spawn goroutines that forward traffic and obtain a DHCP lease.
+	// Spawn goroutines that forward traffic.
 	errCh := make(chan error, 1)
 	go tx(conn, tap, errCh, mtu)
 	go rx(conn, tap, errCh, mtu)
-	go func() {
-		if err := dhcp(); err != nil {
-			errCh <- fmt.Errorf("failed to run DHCP: %w", err)
-		}
-	}()
 	elog.Println("Started goroutines to forward traffic.")
 	select {
 	case err := <-errCh:
@@ -115,7 +110,7 @@ func setupNetworking(c *Config, stop chan bool) error {
 }
 
 func linkUp() error {
-	link, err := netlink.LinkByName(iface)
+	link, err := netlink.LinkByName(ifaceTap)
 	if err != nil {
 		return err
 	}
@@ -130,19 +125,6 @@ func linkUp() error {
 		return err
 	}
 	return netlink.LinkSetUp(link)
-}
-
-func dhcp() error {
-	if _, err := exec.LookPath("udhcpc"); err == nil { // busybox dhcp client
-		cmd := exec.Command("udhcpc", "-f", "-q", "-i", iface, "-v")
-		cmd.Stderr = os.Stderr
-		cmd.Stdout = os.Stdout
-		return cmd.Run()
-	}
-	cmd := exec.Command("dhclient", "-4", "-d", "-v", iface)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	return cmd.Run()
 }
 
 func rx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
