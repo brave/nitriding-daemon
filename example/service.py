@@ -15,6 +15,7 @@ def signal_ready():
 
 def fetch_addr():
     r = requests.get(url="https://ifconfig.me/ip")
+    r.raise_for_status()
     print("[py] Our IP address is: %s" % r.text)
 
 
