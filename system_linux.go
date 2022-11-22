@@ -12,7 +12,7 @@ const (
 	defaultGw = "192.168.127.1"
 	addrLo    = "127.0.0.1/8"
 	addrTap   = "192.168.127.2/24"
-	mac       = "0f:f1:ce:c0:ff:ee"
+	mac       = "ba:aa:ad:c0:ff:ee"
 	ifaceLo   = "lo"
 	ifaceTap  = "tap0"
 )
