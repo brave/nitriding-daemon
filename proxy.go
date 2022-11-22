@@ -22,11 +22,6 @@ var (
 	mtu = 4000
 )
 
-const (
-	// mac indicates the MAC address of the enclave.
-	mac = "5a:94:ef:e4:0c:ee"
-)
-
 // runNetworking calls the function that sets up our networking environment.
 // If anything fails, we try again after a brief wait period.
 func runNetworking(c *Config, stop chan bool) {
@@ -84,9 +79,12 @@ func setupNetworking(c *Config, stop chan bool) error {
 	defer tap.Close()
 	elog.Println("Created TAP device.")
 
-	// Assign an IP address to our freshly creates interface.
-	if err = assignAddrToIface(addrTap, ifaceTap); err != nil {
-		return fmt.Errorf("failed to assign tap address: %w", err)
+	// Configure IP address, MAC address, MTU, default gateway, and DNS.
+	if err = configureTapIface(); err != nil {
+		return fmt.Errorf("failed to configure tap interface: %w", err)
+	}
+	if err = writeResolvconf(); err != nil {
+		return fmt.Errorf("failed to create resolv.conf: %w", err)
 	}
 
 	// Set up networking links.

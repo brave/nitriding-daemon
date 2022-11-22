@@ -49,11 +49,6 @@ const (
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
-	// IP addresses and interface names of our network interfaces.
-	addrLo   = "127.0.0.1/8"
-	addrTap  = "192.168.127.2"
-	ifaceLo  = "lo"
-	ifaceTap = "tap0"
 )
 
 var (
@@ -220,8 +215,8 @@ func (e *Enclave) Start() error {
 		if err = setFdLimit(e.cfg.FdCur, e.cfg.FdMax); err != nil {
 			elog.Printf("Failed to set new file descriptor limit: %s", err)
 		}
-		if err = assignAddrToIface(addrLo, ifaceLo); err != nil {
-			return fmt.Errorf("%s: failed to assign loopback address: %w", errPrefix, err)
+		if err = configureLoIface(); err != nil {
+			return fmt.Errorf("%s: %w", errPrefix, err)
 		}
 	}
 
