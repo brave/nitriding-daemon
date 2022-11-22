@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/brave/nitriding/randseed"
 	"golang.org/x/crypto/acme/autocert"
@@ -174,6 +174,11 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		ready:      make(chan bool),
 	}
 
+	if cfg.Debug {
+		e.pubSrv.Handler.(*chi.Mux).Use(middleware.Logger)
+		e.privSrv.Handler.(*chi.Mux).Use(middleware.Logger)
+	}
+
 	// Register public HTTP API.
 	m := e.pubSrv.Handler.(*chi.Mux)
 	m.Get(pathAttestation, attestationHandler(e.hashes))
@@ -194,11 +199,6 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	if cfg.AppWebSrv != nil {
 		e.revProxy = httputil.NewSingleHostReverseProxy(cfg.AppWebSrv)
 		e.pubSrv.Handler.(*chi.Mux).Handle(pathProxy, proxyHandler(e))
-	}
-
-	if cfg.Debug {
-		e.pubSrv.Handler.(*chi.Mux).Use(middleware.Logger)
-		e.privSrv.Handler.(*chi.Mux).Use(middleware.Logger)
 	}
 
 	return e, nil
