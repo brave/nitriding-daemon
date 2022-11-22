@@ -153,7 +153,12 @@ func hashHandler(e *Enclave) http.HandlerFunc {
 
 // readyHandler returns an HTTP handler that lets the enclave application
 // signal that it's ready, instructing nitriding to start its Internet-facing
-// Web server.
+// Web server.  We initially gate access to the Internet-facing API to avoid
+// the issuance of unexpected attestation documents that lack the application's
+// hash because the application couldn't register it in time.  The downside is
+// that state synchronization among enclaves does not work until the
+// application signalled its readiness.  While not ideal, we chose to ignore
+// this for now.
 func readyHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		close(e.ready)
