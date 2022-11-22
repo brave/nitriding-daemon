@@ -7,11 +7,10 @@ nitriding_url = "http://127.0.0.1:8080/enclave/ready"
 
 
 def signal_ready():
-    ok = 200
     r = requests.get(url=nitriding_url)
-    if r.status_code != ok:
+    if r.status_code != requests.status_codes.codes.ok:
         raise Exception("Expected status code %d but got %d" %
-                        (ok, r.status_code))
+                        (requests.status_codes.codes.ok, r.status_code))
 
 
 def fetch_addr():
