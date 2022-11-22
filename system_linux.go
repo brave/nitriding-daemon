@@ -50,11 +50,6 @@ func configureTapIface() error {
 		return fmt.Errorf("failed to set link address: %w", err)
 	}
 
-	gw := net.ParseIP(defaultGw)
-	if err := l.SetLinkDefaultGw(&gw); err != nil {
-		return fmt.Errorf("failed to set default gateway: %w", err)
-	}
-
 	if err := l.SetLinkMTU(1500); err != nil {
 		return fmt.Errorf("failed to set link MTU: %w", err)
 	}
@@ -65,6 +60,11 @@ func configureTapIface() error {
 
 	if err := l.SetLinkUp(); err != nil {
 		return fmt.Errorf("failed to bring up link: %w", err)
+	}
+
+	gw := net.ParseIP(defaultGw)
+	if err := l.SetLinkDefaultGw(&gw); err != nil {
+		return fmt.Errorf("failed to set default gateway: %w", err)
 	}
 
 	return nil
