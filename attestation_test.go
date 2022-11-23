@@ -107,11 +107,24 @@ func TestAttestationHashes(t *testing.T) {
 	e.privSrv.Handler.ServeHTTP(rec, req)
 
 	s := e.hashes.Serialize()
-	if len(s) != sha256.Size*2 {
+	expectedLen := sha256.Size*2 + len(hashPrefix)*2 + len(hashSeparator)
+	if len(s) != expectedLen {
 		t.Fatalf("Expected serialized hashes to be of length %d but got %d.",
-			sha256.Size*2, len(s))
+			expectedLen, len(s))
 	}
-	if !bytes.Equal(s[sha256.Size:], appKeyHash[:]) {
-		t.Fatalf("Expected application key hash of %x but got %x.", appKeyHash[:], s[sha256.Size:])
+
+	// Make sure that the serialized slice starts with "sha256:".
+	prefix := []byte(hashPrefix)
+	if !bytes.Equal(s[:len(prefix)], prefix) {
+		t.Fatalf("Expected prefix %s but got %s.", prefix, s[:len(prefix)])
+	}
+
+	// Make sure that our previously-set hash is as expected.
+	expected := []byte(hashSeparator)
+	expected = append(expected, []byte(hashPrefix)...)
+	expected = append(expected, appKeyHash[:]...)
+	offset := len(hashPrefix) + sha256.Size
+	if !bytes.Equal(s[offset:], expected) {
+		t.Fatalf("Expected application key hash of %x but got %x.", expected, s[offset:])
 	}
 }
