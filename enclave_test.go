@@ -5,13 +5,14 @@ import (
 )
 
 var defaultCfg = &Config{
-	FQDN:    "example.com",
-	ExtPort: 50000,
-	IntPort: 50001,
-	UseACME: false,
-	Debug:   false,
-	FdCur:   1024,
-	FdMax:   4096,
+	FQDN:          "example.com",
+	ExtPort:       50000,
+	IntPort:       50001,
+	HostProxyPort: 1024,
+	UseACME:       false,
+	Debug:         false,
+	FdCur:         1024,
+	FdMax:         4096,
 }
 
 func createEnclave() *Enclave {
@@ -36,8 +37,10 @@ func TestValidateConfig(t *testing.T) {
 		t.Fatalf("Validation of invalid config did not return an error.")
 	}
 
-	// Set the last required field.
+	// Set the remaining required fields.
 	c.ExtPort = 1
+	c.IntPort = 1
+	c.HostProxyPort = 1
 	if err = c.Validate(); err != nil {
 		t.Fatalf("Validation of valid config returned an error.")
 	}

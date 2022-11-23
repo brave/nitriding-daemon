@@ -82,15 +82,17 @@ type Config struct {
 	// listen on, e.g.  8443.  This port is not *directly* reachable by the
 	// Internet but the EC2 host's proxy *does* forward Internet traffic to
 	// this port.  This field is required.
-	ExtPort int
+	ExtPort uint16
 
 	// IntPort contains the enclave-internal TCP port of the Web server that
-	// provides an HTTP API to the enclave application.
-	IntPort int
+	// provides an HTTP API to the enclave application.  This field is
+	// required.
+	IntPort uint16
 
 	// HostProxyPort indicates the TCP port of the proxy application running on
-	// the EC2 host.  If unset, the default of 1024 is goint to be used.
-	HostProxyPort int
+	// the EC2 host.  Note that VSOCK ports are 32 bits large.  This field is
+	// required.
+	HostProxyPort uint32
 
 	// UseACME must be set to true if you want your enclave application to
 	// request a Let's Encrypt-signed certificate.  If this is set to false,
@@ -117,7 +119,7 @@ type Config struct {
 	// running inside the enclave, e.g., "https://github.com/foo/bar".  The URL
 	// is shown on the enclave's index page, as part of instructions on how to
 	// do remote attestation.
-	AppURL string
+	AppURL *url.URL
 
 	// AppWebSrv should be set to the enclave-internal Web server of the
 	// enclave application, e.g., "http://127.0.0.1:8080".  Nitriding acts as a
@@ -130,11 +132,11 @@ type Config struct {
 
 // Validate returns an error if required fields in the config are not set.
 func (c *Config) Validate() error {
+	if c.ExtPort == 0 || c.IntPort == 0 || c.HostProxyPort == 0 {
+		return errCfgMissingPort
+	}
 	if c.FQDN == "" {
 		return errCfgMissingFQDN
-	}
-	if c.ExtPort == 0 {
-		return errCfgMissingPort
 	}
 	return nil
 }

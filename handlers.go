@@ -26,12 +26,12 @@ var (
 	errHashWrongSize  = errors.New("given hash is of invalid size")
 )
 
-func formatIndexPage(appURL string) string {
+func formatIndexPage(appURL *url.URL) string {
 	page := indexPage
-	if appURL != "" {
+	if appURL != nil {
 		page += fmt.Sprintf("\nIt runs the following code: %s\n"+
 			"Use the following tool to verify the enclave: "+
-			"https://github.com/brave-experiments/verify-enclave", appURL)
+			"https://github.com/brave-experiments/verify-enclave", appURL.String())
 	}
 	return page
 }
