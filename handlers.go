@@ -47,6 +47,8 @@ func rootHandler(cfg *Config) http.HandlerFunc {
 // reqSyncHandler returns a handler that lets the enclave application request
 // state synchronization, which copies the given remote enclave's state into
 // our state.
+//
+// FIXME: https://github.com/brave/nitriding/issues/44
 func reqSyncHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
