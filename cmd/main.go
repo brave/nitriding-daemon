@@ -3,15 +3,11 @@ package main
 import (
 	"flag"
 	"log"
+	"math"
 	"net/url"
 	"os"
 
 	"github.com/brave/nitriding"
-)
-
-const (
-	uint16Max = 0xffff
-	uint32Max = 0xffffffff
 )
 
 var l = log.New(os.Stderr, "nitriding-cmd: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
@@ -42,14 +38,14 @@ func main() {
 	if fqdn == "" {
 		l.Fatalf("-fqdn must be set.")
 	}
-	if extPort < 1 || extPort > uint16Max {
-		l.Fatalf("-extport must be in interval [1, %d]", uint16Max)
+	if extPort < 1 || extPort > math.MaxUint16 {
+		l.Fatalf("-extport must be in interval [1, %d]", math.MaxUint16)
 	}
-	if intPort < 1 || intPort > uint16Max {
-		l.Fatalf("-intport must be in interval [1, %d]", uint16Max)
+	if intPort < 1 || intPort > math.MaxUint16 {
+		l.Fatalf("-intport must be in interval [1, %d]", math.MaxUint16)
 	}
-	if hostProxyPort < 1 || hostProxyPort > uint32Max {
-		l.Fatalf("-host-proxy-port must be in interval [1, %d]", uint32Max)
+	if hostProxyPort < 1 || hostProxyPort > math.MaxUint32 {
+		l.Fatalf("-host-proxy-port must be in interval [1, %d]", math.MaxUint32)
 	}
 
 	c := &nitriding.Config{
