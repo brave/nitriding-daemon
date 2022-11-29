@@ -14,8 +14,7 @@ var l = log.New(os.Stderr, "nitriding-cmd: ", log.Ldate|log.Ltime|log.LUTC|log.L
 
 func main() {
 	var fqdn, appURL, appWebSrv string
-	var extPort, intPort int
-	var hostProxyPort int64
+	var extPort, intPort, hostProxyPort uint
 	var useACME bool
 	var err error
 
@@ -25,11 +24,11 @@ func main() {
 		"Code repository of the enclave application (e.g., \"github.com/foo/bar\").")
 	flag.StringVar(&appWebSrv, "appwebsrv", "",
 		"Enclave-internal HTTP server of the enclave application (e.g., \"http://127.0.0.1:8081\").")
-	flag.IntVar(&extPort, "extport", 8443,
+	flag.UintVar(&extPort, "extport", 8443,
 		"Nitriding's VSOCK-facing HTTPS port.  Must match port forwarding rules on EC2 host.")
-	flag.IntVar(&intPort, "intport", 8080,
+	flag.UintVar(&intPort, "intport", 8080,
 		"Nitriding's enclave-internal HTTP port.  Only used by the enclave application.")
-	flag.Int64Var(&hostProxyPort, "host-proxy-port", 1024,
+	flag.UintVar(&hostProxyPort, "host-proxy-port", 1024,
 		"Port of proxy application running on EC2 host.")
 	flag.BoolVar(&useACME, "acme", false,
 		"Use Let's Encrypt's ACME to fetch HTTPS certificate.")
