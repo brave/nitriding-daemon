@@ -32,7 +32,7 @@ func signalReady(t *testing.T, e *Enclave) {
 }
 
 func TestSyncHandler(t *testing.T) {
-	e := createEnclave()
+	e := createEnclave(&defaultCfg)
 	h := reqSyncHandler(e)
 	rec := httptest.NewRecorder()
 
@@ -47,7 +47,7 @@ func TestSyncHandler(t *testing.T) {
 
 func TestStateHandlers(t *testing.T) {
 	expected := []byte{1, 2, 3, 4, 5} // The key material that we're setting and retrieving.
-	e := createEnclave()
+	e := createEnclave(&defaultCfg)
 	setHandler := putStateHandler(e)
 	getHandler := getStateHandler(e)
 	rec := httptest.NewRecorder()
@@ -102,7 +102,7 @@ func TestProxyHandler(t *testing.T) {
 
 	c := defaultCfg
 	c.AppWebSrv = u
-	e, err := NewEnclave(c)
+	e, err := NewEnclave(&c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestProxyHandler(t *testing.T) {
 }
 
 func TestHashHandler(t *testing.T) {
-	e := createEnclave()
+	e := createEnclave(&defaultCfg)
 	h := hashHandler(e)
 	validHash := [sha256.Size]byte{}
 	validHashB64 := base64.StdEncoding.EncodeToString(validHash[:])
@@ -176,8 +176,25 @@ func TestHashHandler(t *testing.T) {
 	}
 }
 
+func TestReadiness(t *testing.T) {
+	cfg := defaultCfg
+	cfg.WaitForApp = false
+	e := createEnclave(&cfg)
+	if err := e.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop() //nolint:errcheck
+
+	// Make sure that the Internet-facing Web server is already running because
+	// we didn't ask nitriding to wait for the application.
+	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPort)
+	if _, err := http.Get(nitridingSrv + pathRoot); err != nil {
+		t.Fatalf("Expected no error but got %v", err)
+	}
+}
+
 func TestReadyHandler(t *testing.T) {
-	e := createEnclave()
+	e := createEnclave(&defaultCfg)
 	if err := e.Start(); err != nil {
 		t.Fatal(err)
 	}

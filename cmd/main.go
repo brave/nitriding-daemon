@@ -15,7 +15,7 @@ var l = log.New(os.Stderr, "nitriding-cmd: ", log.Ldate|log.Ltime|log.LUTC|log.L
 func main() {
 	var fqdn, appURL, appWebSrv string
 	var extPort, intPort, hostProxyPort uint
-	var useACME bool
+	var useACME, waitForApp bool
 	var err error
 
 	flag.StringVar(&fqdn, "fqdn", "",
@@ -32,6 +32,8 @@ func main() {
 		"Port of proxy application running on EC2 host.")
 	flag.BoolVar(&useACME, "acme", false,
 		"Use Let's Encrypt's ACME to fetch HTTPS certificate.")
+	flag.BoolVar(&waitForApp, "wait-for-app", false,
+		"Start Internet-facing Web server only after application signals its readiness.")
 	flag.Parse()
 
 	if fqdn == "" {
@@ -53,6 +55,7 @@ func main() {
 		IntPort:       uint16(intPort),
 		HostProxyPort: uint32(hostProxyPort),
 		UseACME:       useACME,
+		WaitForApp:    waitForApp,
 	}
 	if appURL != "" {
 		u, err := url.Parse(appURL)

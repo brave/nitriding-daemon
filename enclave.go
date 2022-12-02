@@ -128,6 +128,12 @@ type Config struct {
 	// if the enclave application exposes an HTTP server.  Non-HTTP enclave
 	// applications can ignore this.
 	AppWebSrv *url.URL
+
+	// WaitForApp instructs nitriding to wait for the application's signal
+	// before launching the Internet-facing Web server.  Set this flag if your
+	// application takes a while to bootstrap and you don't want to risk
+	// inconsistent state when syncing, or unexpected attestation documents.
+	WaitForApp bool
 }
 
 // Validate returns an error if required fields in the config are not set.
@@ -261,12 +267,13 @@ func startWebServers(e *Enclave) error {
 	elog.Printf("Starting public (%s) and private (%s) Web server.", e.pubSrv.Addr, e.privSrv.Addr)
 
 	go e.privSrv.ListenAndServe() //nolint:errcheck
-
-	// Don't launch our Internet-facing Web server until the application
-	// signalled that it's ready.
 	go func() {
-		<-e.ready
-		elog.Println("Application signalled that it's ready.  Starting public Web server.")
+		// If desired, don't launch our Internet-facing Web server until the
+		// application signalled that it's ready.
+		if e.cfg.WaitForApp {
+			<-e.ready
+			elog.Println("Application signalled that it's ready.  Starting public Web server.")
+		}
 		e.pubSrv.ListenAndServeTLS("", "") //nolint:errcheck
 	}()
 
