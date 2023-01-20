@@ -14,7 +14,7 @@ nitriding->>ec2: Establish TAP tunnel
 nitriding->>nitriding: Set up enclave-internal Web server
 
 nitriding->>+ec2: Packet forwarding
-ec2->>+ca: Request HTTPS certificate (via HTTP-01)
+ec2->>+ca: Request HTTPS certificate (via TLS-ALPN-01)
 ca-->>-ec2: HTTPS certificate
 ec2-->>-nitriding: Packet forwarding
 

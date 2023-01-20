@@ -367,8 +367,6 @@ func (e *Enclave) setupAcme() error {
 	e.pubSrv.TLSConfig = certManager.TLSConfig()
 
 	go func() {
-		// Wait until the HTTP-01 listener returned and then check if our new
-		// certificate is cached.
 		var rawData []byte
 		for {
 			// Get the SHA-1 hash over our leaf certificate.
