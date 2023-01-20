@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/hf/nitrite"
 	"golang.org/x/crypto/nacl/box"
@@ -25,8 +24,6 @@ var (
 	errInvalidBoxKeys  = errors.New("invalid box key material")
 	errPCRNotIdentical = errors.New("remote enclave's PCR values not identical")
 )
-
-type timeFunc func() time.Time
 
 // nonceHandler returns a HandlerFunc that creates a new nonce and returns it
 // to the client.
@@ -45,7 +42,7 @@ func nonceHandler(e *Enclave) http.HandlerFunc {
 
 // respSyncHandler returns a HandlerFunc that shares our secret key material
 // with the requesting enclave -- after authentication, of course.
-func respSyncHandler(e *Enclave, curTime timeFunc) http.HandlerFunc {
+func respSyncHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var ourNonce, theirNonce nonce
 

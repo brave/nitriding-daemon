@@ -186,7 +186,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	m.Get(pathAttestation, attestationHandler(e.hashes))
 	m.Get(pathNonce, nonceHandler(e))
 	m.Get(pathRoot, rootHandler(e.cfg))
-	m.Post(pathSync, respSyncHandler(e, time.Now))
+	m.Post(pathSync, respSyncHandler(e))
 
 	// Register enclave-internal HTTP API.
 	m = e.privSrv.Handler.(*chi.Mux)
