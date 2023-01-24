@@ -44,9 +44,20 @@ func rootHandler(cfg *Config) http.HandlerFunc {
 	}
 }
 
+// proxyHandler returns an HTTP handler that proxies HTTP requests to the
+// enclave-internal HTTP server of our enclave application.
+func proxyHandler(e *Enclave) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		e.revProxy.ServeHTTP(w, r)
+	}
+}
+
 // reqSyncHandler returns a handler that lets the enclave application request
 // state synchronization, which copies the given remote enclave's state into
 // our state.
+//
+// This is an enclave-internal endpoint that can only be accessed by the
+// trusted enclave application.
 //
 // FIXME: https://github.com/brave/nitriding/issues/44
 func reqSyncHandler(e *Enclave) http.HandlerFunc {
@@ -77,6 +88,9 @@ func reqSyncHandler(e *Enclave) http.HandlerFunc {
 
 // getStateHandler returns a handler that lets the enclave application retrieve
 // previously-set state.
+//
+// This is an enclave-internal endpoint that can only be accessed by the
+// trusted enclave application.
 func getStateHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -101,6 +115,9 @@ func getStateHandler(e *Enclave) http.HandlerFunc {
 // putStateHandler returns a handler that lets the enclave application set
 // state that's synchronized with another enclave in case of horizontal
 // scaling.  The state can be arbitrary bytes.
+//
+// This is an enclave-internal endpoint that can only be accessed by the
+// trusted enclave application.
 func putStateHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(newLimitReader(r.Body, maxKeyMaterialLen))
@@ -113,19 +130,14 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 	}
 }
 
-// proxyHandler returns an HTTP handler that proxies HTTP requests to the
-// enclave-internal HTTP server of our enclave application.
-func proxyHandler(e *Enclave) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		e.revProxy.ServeHTTP(w, r)
-	}
-}
-
 // hashHandler returns an HTTP handler that allows the enclave application to
 // register a hash over a public key which is going to be included in
 // attestation documents.  This allows clients to tie the attestation document
 // (which acts as the root of trust) to key material that's used by the enclave
 // application.
+//
+// This is an enclave-internal endpoint that can only be accessed by the
+// trusted enclave application.
 func hashHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Allow an extra byte for the \n.
@@ -161,6 +173,9 @@ func hashHandler(e *Enclave) http.HandlerFunc {
 // that state synchronization among enclaves does not work until the
 // application signalled its readiness.  While not ideal, we chose to ignore
 // this for now.
+//
+// This is an enclave-internal endpoint that can only be accessed by the
+// trusted enclave application.
 func readyHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		close(e.ready)
