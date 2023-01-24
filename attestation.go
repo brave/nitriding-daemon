@@ -2,6 +2,7 @@ package nitriding
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -18,6 +19,8 @@ const (
 	nonceLen       = 20           // The size of a nonce in bytes.
 	nonceNumDigits = nonceLen * 2 // The number of hex digits in a nonce.
 	maxAttDocLen   = 5000         // A (reasonable?) upper limit for attestation doc lengths.
+	hashPrefix     = "sha256:"
+	hashSeparator  = ";"
 )
 
 var (
@@ -34,13 +37,32 @@ var (
 	getPCRValues = func() (map[uint][]byte, error) { return _getPCRValues() }
 )
 
-// getAttestationHandler takes as input a SHA-256 hash over an HTTPS
-// certificate and returns a HandlerFunc.  This HandlerFunc expects a nonce in
-// the URL query parameters and subsequently asks its hypervisor for an
-// attestation document that contains both the nonce and the certificate hash.
-// The resulting Base64-encoded attestation document is then returned to the
-// requester.
-func getAttestationHandler(certHash *[32]byte) http.HandlerFunc {
+// AttestationHashes contains hashes over public key material which we embed in
+// the enclave's attestation document for clients to verify.
+type AttestationHashes struct {
+	tlsKeyHash [sha256.Size]byte // Always set.
+	appKeyHash [sha256.Size]byte // Sometimes set, depending on application.
+}
+
+// Serialize returns a byte slice that contains our concatenated hashes.  Note
+// that all hashes are always present.  If a hash was not initialized, it's set
+// to 0-bytes.
+func (a *AttestationHashes) Serialize() []byte {
+	str := fmt.Sprintf("%s%s%s%s%s",
+		hashPrefix,
+		a.tlsKeyHash,
+		hashSeparator,
+		hashPrefix,
+		a.appKeyHash)
+	return []byte(str)
+}
+
+// attestationHandler takes as input an AttestationHashes struct and returns a
+// HandlerFunc.  This HandlerFunc expects a nonce in the URL query parameters
+// and subsequently asks its hypervisor for an attestation document that
+// contains both the nonce and the hashes in the given struct.  The resulting
+// Base64-encoded attestation document is then returned to the requester.
+func attestationHandler(hashes *AttestationHashes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, errMethodNotGET, http.StatusMethodNotAllowed)
@@ -67,7 +89,7 @@ func getAttestationHandler(certHash *[32]byte) http.HandlerFunc {
 			return
 		}
 
-		rawDoc, err := attest(rawNonce, certHash[:], nil)
+		rawDoc, err := attest(rawNonce, hashes.Serialize(), nil)
 		if err != nil {
 			http.Error(w, errFailedAttestation, http.StatusInternalServerError)
 			return

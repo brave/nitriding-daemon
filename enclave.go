@@ -16,8 +16,8 @@ import (
 	"fmt"
 	"log"
 	"math/big"
-	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"sync"
@@ -25,65 +25,74 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/mdlayher/vsock"
 
 	"github.com/brave/nitriding/randseed"
-	"github.com/brave/viproxy"
 	"golang.org/x/crypto/acme/autocert"
 )
 
 const (
 	acmeCertCacheDir    = "cert-cache"
-	certificateOrg      = "Brave Software"
+	certificateOrg      = "AWS Nitro enclave application"
 	certificateValidity = time.Hour * 24 * 356
 	// parentCID determines the CID (analogous to an IP address) of the parent
 	// EC2 instance.  According to the AWS docs, it is always 3:
 	// https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-concepts.html
 	parentCID = 3
-	// parentProxyPort determines the TCP port of the SOCKS proxy that's
-	// running on the parent EC2 instance.
-	parentProxyPort = 1080
-	pathNonce       = "/nonce"
-	pathAttestation = "/attestation"
-	pathKeys        = "/keys"
-	pathRoot        = "/"
+	// The following paths are handled by nitriding.
+	pathRoot        = "/enclave"
+	pathNonce       = "/enclave/nonce"
+	pathAttestation = "/enclave/attestation"
+	pathState       = "/enclave/state"
+	pathSync        = "/enclave/sync"
+	pathHash        = "/enclave/hash"
+	pathReady       = "/enclave/ready"
+	// All other paths are handled by the enclave application's Web server if
+	// it exists.
+	pathProxy = "/*"
 )
 
 var (
-	elog             = log.New(os.Stderr, "nitriding: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
-	inEnclave        = false
-	errNoKeyMaterial = errors.New("no key material registered")
+	elog              = log.New(os.Stderr, "nitriding: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
+	inEnclave         = false
+	errNoKeyMaterial  = errors.New("no key material registered")
+	errCfgMissingFQDN = errors.New("given config is missing FQDN")
+	errCfgMissingPort = errors.New("given config is missing port")
 )
 
 // Enclave represents a service running inside an AWS Nitro Enclave.
 type Enclave struct {
 	sync.RWMutex
-	cfg         *Config
-	httpSrv     http.Server
-	router      *chi.Mux
-	certFpr     [sha256.Size]byte
-	nonceCache  *cache
-	keyMaterial any
+	cfg             *Config
+	pubSrv, privSrv http.Server
+	revProxy        *httputil.ReverseProxy
+	hashes          *AttestationHashes
+	nonceCache      *cache
+	keyMaterial     any
+	ready, stop     chan bool
 }
 
 // Config represents the configuration of our enclave service.
 type Config struct {
-	// SOCKSProxy must be set if
-	//   1) your enclave application should obtain a Let's Encrypt-signed
-	//      certificate (i.e., if UseACME is set to true)
-	// or if
-	//   2) your enclave application makes HTTP requests over the Internet.
-	// If so, set SOCKSProxy to "socks5://127.0.0.1:1080".
-	SOCKSProxy string
-
 	// FQDN contains the fully qualified domain name that's set in the HTTPS
-	// certificate of the enclave's Web server, e.g. "example.com".
+	// certificate of the enclave's Web server, e.g. "example.com".  This field
+	// is required.
 	FQDN string
 
-	// Port contains the TCP port that the Web server should listen on, e.g.
-	// 8443.  Note that the Web server listens for this port on the private
-	// VSOCK interface.  This is not an Internet-facing port.
-	Port int
+	// ExtPort contains the VSOCK-facing TCP port that the Web server should
+	// listen on, e.g.  8443.  This port is not *directly* reachable by the
+	// Internet but the EC2 host's proxy *does* forward Internet traffic to
+	// this port.  This field is required.
+	ExtPort uint16
+
+	// IntPort contains the enclave-internal TCP port of the Web server that
+	// provides an HTTP API to the enclave application.  This field is
+	// required.
+	IntPort uint16
+
+	// HostProxyPort indicates the TCP port of the proxy application running on
+	// the EC2 host.  Note that VSOCK ports are 32 bits large.  This field is
+	// required.
+	HostProxyPort uint32
 
 	// UseACME must be set to true if you want your enclave application to
 	// request a Let's Encrypt-signed certificate.  If this is set to false,
@@ -110,7 +119,26 @@ type Config struct {
 	// running inside the enclave, e.g., "https://github.com/foo/bar".  The URL
 	// is shown on the enclave's index page, as part of instructions on how to
 	// do remote attestation.
-	AppURL string
+	AppURL *url.URL
+
+	// AppWebSrv should be set to the enclave-internal Web server of the
+	// enclave application, e.g., "http://127.0.0.1:8080".  Nitriding acts as a
+	// TLS-terminating reverse proxy and forwards incoming HTTP requests to
+	// this Web server.  Note that this configuration option is only necessary
+	// if the enclave application exposes an HTTP server.  Non-HTTP enclave
+	// applications can ignore this.
+	AppWebSrv *url.URL
+}
+
+// Validate returns an error if required fields in the config are not set.
+func (c *Config) Validate() error {
+	if c.ExtPort == 0 || c.IntPort == 0 || c.HostProxyPort == 0 {
+		return errCfgMissingPort
+	}
+	if c.FQDN == "" {
+		return errCfgMissingFQDN
+	}
+	return nil
 }
 
 // init is called once, at package initialization time.
@@ -127,42 +155,76 @@ func init() {
 }
 
 // NewEnclave creates and returns a new enclave with the given config.
-func NewEnclave(cfg *Config) *Enclave {
-	r := chi.NewRouter()
+func NewEnclave(cfg *Config) (*Enclave, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("failed to create enclave: %w", err)
+	}
+
 	e := &Enclave{
-		cfg:    cfg,
-		router: r,
-		httpSrv: http.Server{
-			Addr:    fmt.Sprintf(":%d", cfg.Port),
-			Handler: r,
+		cfg: cfg,
+		pubSrv: http.Server{
+			Addr:    fmt.Sprintf(":%d", cfg.ExtPort),
+			Handler: chi.NewRouter(),
+		},
+		privSrv: http.Server{
+			Addr:    fmt.Sprintf("127.0.0.1:%d", cfg.IntPort),
+			Handler: chi.NewRouter(),
 		},
 		nonceCache: newCache(defaultItemExpiry),
-	}
-	if cfg.Debug {
-		e.router.Use(middleware.Logger)
+		hashes:     new(AttestationHashes),
+		stop:       make(chan bool),
+		ready:      make(chan bool),
 	}
 
-	return e
+	if cfg.Debug {
+		e.pubSrv.Handler.(*chi.Mux).Use(middleware.Logger)
+		e.privSrv.Handler.(*chi.Mux).Use(middleware.Logger)
+	}
+
+	// Register public HTTP API.
+	m := e.pubSrv.Handler.(*chi.Mux)
+	m.Get(pathAttestation, attestationHandler(e.hashes))
+	m.Get(pathNonce, nonceHandler(e))
+	m.Get(pathRoot, rootHandler(e.cfg))
+	m.Post(pathSync, respSyncHandler(e))
+
+	// Register enclave-internal HTTP API.
+	m = e.privSrv.Handler.(*chi.Mux)
+	m.Get(pathSync, reqSyncHandler(e))
+	m.Get(pathReady, readyHandler(e))
+	m.Get(pathState, getStateHandler(e))
+	m.Put(pathState, putStateHandler(e))
+	m.Post(pathHash, hashHandler(e))
+
+	// Configure our reverse proxy if the enclave application exposes an HTTP
+	// server.
+	if cfg.AppWebSrv != nil {
+		e.revProxy = httputil.NewSingleHostReverseProxy(cfg.AppWebSrv)
+		e.pubSrv.Handler.(*chi.Mux).Handle(pathProxy, proxyHandler(e))
+	}
+
+	return e, nil
 }
 
-// Start starts the Nitro Enclave.  If it bootstraps correctly, this function
-// won't return because it starts an HTTPS server.  If something goes wrong,
-// the function returns an error.
+// Start starts the Nitro Enclave.  If something goes wrong, the function
+// returns an error.
 func (e *Enclave) Start() error {
 	var err error
 	errPrefix := "failed to start Nitro Enclave"
 
+	// Set file descriptor limit.  There's no need to exit if this fails.
 	if inEnclave {
-		if err = assignLoAddr(); err != nil {
-			return fmt.Errorf("%s: failed to assign loopback address: %w", errPrefix, err)
+		if err = setFdLimit(e.cfg.FdCur, e.cfg.FdMax); err != nil {
+			elog.Printf("Failed to set new file descriptor limit: %s", err)
 		}
-		elog.Println("Assigned address to lo interface.")
+		if err = configureLoIface(); err != nil {
+			return fmt.Errorf("%s: %w", errPrefix, err)
+		}
 	}
 
-	// Set file descriptor limit.  There's no need to exit if this fails.
-	if err = setFdLimit(e.cfg.FdCur, e.cfg.FdMax); err != nil {
-		elog.Printf("Failed to set new file descriptor limit: %s", err)
-	}
+	// Set up our networking environment which creates a TAP device that
+	// forwards traffic (via the VSOCK interface) to the EC2 host.
+	go runNetworking(e.cfg, e.stop)
 
 	// Get an HTTPS certificate.
 	if e.cfg.UseACME {
@@ -173,64 +235,42 @@ func (e *Enclave) Start() error {
 	if err != nil {
 		return fmt.Errorf("%s: failed to create certificate: %w", errPrefix, err)
 	}
-	if inEnclave {
-		e.router.Get(pathAttestation, getAttestationHandler(&e.certFpr))
-	}
-	e.router.Get(pathNonce, getNonceHandler(e))
-	e.router.Get(pathRoot, getIndexHandler(e.cfg))
-	e.router.Post(pathKeys, getKeysHandler(e, time.Now))
 
-	// Tell Go's HTTP library to use SOCKS proxy for both HTTP and HTTPS.
-	if err := os.Setenv("HTTP_PROXY", e.cfg.SOCKSProxy); err != nil {
-		return fmt.Errorf("%s: failed to set env var: %w", errPrefix, err)
-	}
-	if err := os.Setenv("HTTPS_PROXY", e.cfg.SOCKSProxy); err != nil {
-		return fmt.Errorf("%s: failed to set env var: %w", errPrefix, err)
+	if err = startWebServers(e); err != nil {
+		return fmt.Errorf("%s: %w", errPrefix, err)
 	}
 
-	// Set up AF_INET to AF_VSOCK proxy to facilitate the use of the SOCKS
-	// proxy.
-	u, err := url.Parse(e.cfg.SOCKSProxy)
-	if err != nil {
-		return fmt.Errorf("failed to parse SOCKSProxy from config: %w", err)
-	}
-	inAddr, err := net.ResolveTCPAddr("tcp", u.Host)
-	if err != nil {
-		return fmt.Errorf("failed to resolve SOCKSProxy from config: %w", err)
-	}
-	tuple := &viproxy.Tuple{
-		InAddr:  inAddr,
-		OutAddr: &vsock.Addr{ContextID: uint32(parentCID), Port: uint32(parentProxyPort)},
-	}
-	proxy := viproxy.NewVIProxy([]*viproxy.Tuple{tuple})
-	if err := proxy.Start(); err != nil {
-		return fmt.Errorf("failed to start VIProxy: %w", err)
-	}
+	return nil
+}
 
-	elog.Printf("Starting Web server on port %s.", e.httpSrv.Addr)
-	var l net.Listener
-
-	// Finally, start the Web server.  If we're inside an enclave, we use a
-	// vsock-enabled listener, otherwise a simple tcp listener.
-	if inEnclave {
-		l, err = vsock.Listen(uint32(e.cfg.Port), nil)
-		if err != nil {
-			return fmt.Errorf("%s: failed to create vsock listener: %w", errPrefix, err)
-		}
-		defer func() {
-			_ = l.Close()
-		}()
-
-		return e.httpSrv.ServeTLS(l, "", "")
+// Stop stops the enclave.
+func (e *Enclave) Stop() error {
+	close(e.stop)
+	if err := e.privSrv.Shutdown(context.Background()); err != nil {
+		return err
 	}
-	l, err = net.Listen("tcp", e.httpSrv.Addr)
-	if err != nil {
-		return fmt.Errorf("%s: failed to create tcp listener: %w", errPrefix, err)
+	if err := e.pubSrv.Shutdown(context.Background()); err != nil {
+		return err
 	}
-	defer func() {
-		_ = l.Close()
+	return nil
+}
+
+// startWebServers starts both our public-facing and our enclave-internal Web
+// server in a goroutine.
+func startWebServers(e *Enclave) error {
+	elog.Printf("Starting public (%s) and private (%s) Web server.", e.pubSrv.Addr, e.privSrv.Addr)
+
+	go e.privSrv.ListenAndServe() //nolint:errcheck
+
+	// Don't launch our Internet-facing Web server until the application
+	// signalled that it's ready.
+	go func() {
+		<-e.ready
+		elog.Println("Application signalled that it's ready.  Starting public Web server.")
+		e.pubSrv.ListenAndServeTLS("", "") //nolint:errcheck
 	}()
-	return e.httpSrv.ServeTLS(l, "", "")
+
+	return nil
 }
 
 // genSelfSignedCert creates and returns a self-signed TLS certificate based on
@@ -293,7 +333,7 @@ func (e *Enclave) genSelfSignedCert() error {
 		return err
 	}
 
-	e.httpSrv.TLSConfig = &tls.Config{
+	e.pubSrv.TLSConfig = &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
 
@@ -324,18 +364,9 @@ func (e *Enclave) setupAcme() error {
 		Prompt:     autocert.AcceptTOS,
 		HostPolicy: autocert.HostWhitelist([]string{e.cfg.FQDN}...),
 	}
-
-	errChan := make(chan error)
-	go listenHTTP01(errChan, &certManager)
-	if err := <-errChan; err != nil {
-		return err
-	}
-
-	e.httpSrv.TLSConfig = &tls.Config{GetCertificate: certManager.GetCertificate}
+	e.pubSrv.TLSConfig = certManager.TLSConfig()
 
 	go func() {
-		// Wait until the HTTP-01 listener returned and then check if our new
-		// certificate is cached.
 		var rawData []byte
 		for {
 			// Get the SHA-1 hash over our leaf certificate.
@@ -373,38 +404,15 @@ func (e *Enclave) setCertFingerprint(rawData []byte) error {
 				return err
 			}
 			if !cert.IsCA {
-				e.certFpr = sha256.Sum256(cert.Raw)
-				elog.Printf("Set SHA-256 fingerprint of server's certificate to: %x", e.certFpr[:])
+				e.hashes.tlsKeyHash = sha256.Sum256(cert.Raw)
+				elog.Printf("Set SHA-256 fingerprint of server's certificate to: %x",
+					e.hashes.tlsKeyHash[:])
 				return nil
 			}
 		}
 		rawData = rest
 	}
 	return nil
-}
-
-// AddRoute adds an HTTP handler for the given HTTP method and pattern.
-func (e *Enclave) AddRoute(method, pattern string, handlerFn http.HandlerFunc) {
-	switch method {
-	case http.MethodGet:
-		e.router.Get(pattern, handlerFn)
-	case http.MethodHead:
-		e.router.Head(pattern, handlerFn)
-	case http.MethodPost:
-		e.router.Post(pattern, handlerFn)
-	case http.MethodPut:
-		e.router.Put(pattern, handlerFn)
-	case http.MethodPatch:
-		e.router.Patch(pattern, handlerFn)
-	case http.MethodDelete:
-		e.router.Delete(pattern, handlerFn)
-	case http.MethodConnect:
-		e.router.Connect(pattern, handlerFn)
-	case http.MethodOptions:
-		e.router.Options(pattern, handlerFn)
-	case http.MethodTrace:
-		e.router.Trace(pattern, handlerFn)
-	}
 }
 
 // SetKeyMaterial registers the enclave's key material (e.g., secret encryption

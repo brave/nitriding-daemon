@@ -125,7 +125,7 @@ func requestNonce(addr string) (nonce, error) {
 func requestAttDoc(addr string, ourAttDoc []byte) ([]byte, error) {
 	errStr := "failed to fetch attestation doc from remote enclave"
 
-	endpoint := fmt.Sprintf("%s%s", addr, pathKeys)
+	endpoint := fmt.Sprintf("%s%s", addr, pathSync)
 
 	// Finally, send our attestation document to the remote enclave.  If
 	// everything works out, the remote enclave is going to respond with its
