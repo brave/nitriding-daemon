@@ -153,11 +153,11 @@ func init() {
 
 	// Determine if we're inside an enclave.  Abort execution in the unexpected
 	// case that we cannot tell.
-	elog.Println("Determining whether we're running inside an enclave.")
 	inEnclave, err = randseed.InEnclave()
 	if err != nil {
 		elog.Fatalf("Failed to determine if we're inside an enclave: %v", err)
 	}
+	elog.Printf("We're running inside an enclave: %v", inEnclave)
 }
 
 // NewEnclave creates and returns a new enclave with the given config.
