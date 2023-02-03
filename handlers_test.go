@@ -186,7 +186,10 @@ func TestReadiness(t *testing.T) {
 	defer e.Stop() //nolint:errcheck
 
 	// Make sure that the Internet-facing Web server is already running because
-	// we didn't ask nitriding to wait for the application.
+	// we didn't ask nitriding to wait for the application.  Give the Web
+	// server 100 milliseconds to start.  This isn't great but there's no
+	// convenient way to check if the Web server is already running.
+	time.Sleep(time.Millisecond * 100)
 	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPort)
 	if _, err := http.Get(nitridingSrv + pathRoot); err != nil {
 		t.Fatalf("Expected no error but got %v", err)
