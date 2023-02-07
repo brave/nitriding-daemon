@@ -203,10 +203,13 @@ func TestReadiness(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Expected no error but got %v", err)
 			}
-			if resp.StatusCode == http.StatusOK {
-				return
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("Expected status code %d but got %d.",
+					http.StatusOK, resp.StatusCode)
 			}
+			return
 		}
+		t.Fatal("Unable to talk to Internet-facing Web server.")
 	}(t, u)
 }
 
