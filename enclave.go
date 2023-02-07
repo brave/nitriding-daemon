@@ -133,6 +133,9 @@ type Config struct {
 	// before launching the Internet-facing Web server.  Set this flag if your
 	// application takes a while to bootstrap and you don't want to risk
 	// inconsistent state when syncing, or unexpected attestation documents.
+	// If set, your application must make the following request when ready:
+	//
+	//     GET http://127.0.0.1:{IntPort}/enclave/ready
 	WaitForApp bool
 }
 
