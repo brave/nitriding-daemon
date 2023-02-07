@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/hf/nitrite"
 	"github.com/hf/nsm"
@@ -78,6 +79,7 @@ func attestationHandler(hashes *AttestationHashes) http.HandlerFunc {
 			http.Error(w, errNoNonce, http.StatusBadRequest)
 			return
 		}
+		nonce = strings.ToLower(nonce)
 		if valid, _ := regexp.MatchString(nonceRegExp, nonce); !valid {
 			http.Error(w, errBadNonceFormat, http.StatusBadRequest)
 			return

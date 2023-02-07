@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-var defaultCfg = &Config{
+var defaultCfg = Config{
 	FQDN:          "example.com",
 	ExtPort:       50000,
 	IntPort:       50001,
@@ -13,10 +13,11 @@ var defaultCfg = &Config{
 	Debug:         false,
 	FdCur:         1024,
 	FdMax:         4096,
+	WaitForApp:    true,
 }
 
-func createEnclave() *Enclave {
-	e, err := NewEnclave(defaultCfg)
+func createEnclave(cfg *Config) *Enclave {
+	e, err := NewEnclave(cfg)
 	if err != nil {
 		panic(err)
 	}
@@ -47,14 +48,14 @@ func TestValidateConfig(t *testing.T) {
 }
 
 func TestGenSelfSignedCert(t *testing.T) {
-	e := createEnclave()
+	e := createEnclave(&defaultCfg)
 	if err := e.genSelfSignedCert(); err != nil {
 		t.Fatalf("Failed to create self-signed certificate: %s", err)
 	}
 }
 
 func TestKeyMaterial(t *testing.T) {
-	e := createEnclave()
+	e := createEnclave(&defaultCfg)
 	k := struct{ Foo string }{"foobar"}
 
 	if _, err := e.KeyMaterial(); err != errNoKeyMaterial {

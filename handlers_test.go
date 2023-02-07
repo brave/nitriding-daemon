@@ -5,13 +5,14 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
-	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -32,7 +33,7 @@ func signalReady(t *testing.T, e *Enclave) {
 }
 
 func TestSyncHandler(t *testing.T) {
-	e := createEnclave()
+	e := createEnclave(&defaultCfg)
 	h := reqSyncHandler(e)
 	rec := httptest.NewRecorder()
 
@@ -47,7 +48,7 @@ func TestSyncHandler(t *testing.T) {
 
 func TestStateHandlers(t *testing.T) {
 	expected := []byte{1, 2, 3, 4, 5} // The key material that we're setting and retrieving.
-	e := createEnclave()
+	e := createEnclave(&defaultCfg)
 	setHandler := putStateHandler(e)
 	getHandler := getStateHandler(e)
 	rec := httptest.NewRecorder()
@@ -102,7 +103,7 @@ func TestProxyHandler(t *testing.T) {
 
 	c := defaultCfg
 	c.AppWebSrv = u
-	e, err := NewEnclave(c)
+	e, err := NewEnclave(&c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +136,7 @@ func TestProxyHandler(t *testing.T) {
 }
 
 func TestHashHandler(t *testing.T) {
-	e := createEnclave()
+	e := createEnclave(&defaultCfg)
 	h := hashHandler(e)
 	validHash := [sha256.Size]byte{}
 	validHashB64 := base64.StdEncoding.EncodeToString(validHash[:])
@@ -176,8 +177,46 @@ func TestHashHandler(t *testing.T) {
 	}
 }
 
+func TestReadiness(t *testing.T) {
+	cfg := defaultCfg
+	cfg.WaitForApp = false
+	e := createEnclave(&cfg)
+	if err := e.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop() //nolint:errcheck
+
+	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPort)
+	u := nitridingSrv + pathRoot
+	// Make sure that the Internet-facing Web server is already running because
+	// we didn't ask nitriding to wait for the application.  The Web server may
+	// not be running by the time we test it, so we back off a few times, to
+	// give the Web server time to start.
+	func(t *testing.T, u string) {
+		for i := 0; i < 100; i += 10 {
+			resp, err := http.Get(u)
+			// The server probably isn't ready yet.  Sleep briefly.
+			if errors.Is(err, syscall.ECONNREFUSED) {
+				time.Sleep(time.Millisecond * time.Duration(i))
+				continue
+			}
+			if err != nil {
+				t.Fatalf("Expected no error but got %v", err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("Expected status code %d but got %d.",
+					http.StatusOK, resp.StatusCode)
+			}
+			return
+		}
+		t.Fatal("Unable to talk to Internet-facing Web server.")
+	}(t, u)
+}
+
 func TestReadyHandler(t *testing.T) {
-	e := createEnclave()
+	cfg := defaultCfg
+	cfg.WaitForApp = true
+	e := createEnclave(&cfg)
 	if err := e.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +225,7 @@ func TestReadyHandler(t *testing.T) {
 	// Check if the Internet-facing Web server is running.
 	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPort)
 	_, err := http.Get(nitridingSrv + pathRoot)
-	if !strings.Contains(err.Error(), "connection refused") {
+	if !errors.Is(err, syscall.ECONNREFUSED) {
 		t.Fatal("Expected 'connection refused'.")
 	}
 	signalReady(t, e)
