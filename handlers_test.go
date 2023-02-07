@@ -222,7 +222,7 @@ func TestReadyHandler(t *testing.T) {
 	// Check if the Internet-facing Web server is running.
 	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPort)
 	_, err := http.Get(nitridingSrv + pathRoot)
-	if !strings.Contains(err.Error(), "connection refused") {
+	if !errors.Is(err, syscall.ECONNREFUSED) {
 		t.Fatal("Expected 'connection refused'.")
 	}
 	signalReady(t, e)
