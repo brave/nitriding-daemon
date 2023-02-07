@@ -197,7 +197,9 @@ func TestReadiness(t *testing.T) {
 }
 
 func TestReadyHandler(t *testing.T) {
-	e := createEnclave(&defaultCfg)
+	cfg := defaultCfg
+	cfg.WaitForApp = true
+	e := createEnclave(&cfg)
 	if err := e.Start(); err != nil {
 		t.Fatal(err)
 	}
