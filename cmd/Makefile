@@ -1,7 +1,7 @@
 .PHONY: all lint clean
 
 binary = nitriding
-godeps = *.go ../*.go ../go.mod ../go.sum
+godeps = *.go ../*.go ../go.mod ../go.sum Makefile
 
 all: lint $(binary)
 
