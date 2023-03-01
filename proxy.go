@@ -67,11 +67,8 @@ func setupNetworking(c *Config, stop chan bool) error {
 
 	// Create a TAP interface.
 	tap, err := water.New(water.Config{
-		DeviceType: water.TAP,
-		PlatformSpecificParams: water.PlatformSpecificParams{
-			Name:       ifaceTap,
-			MultiQueue: true,
-		},
+		DeviceType:             water.TAP,
+		PlatformSpecificParams: ourWaterParams,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create tap device: %w", err)

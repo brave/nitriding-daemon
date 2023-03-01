@@ -6,16 +6,13 @@ import (
 	"os"
 
 	"github.com/milosgajdos/tenus"
+	"github.com/songgao/water"
 )
 
-const (
-	defaultGw = "192.168.127.1"
-	addrLo    = "127.0.0.1/8"
-	addrTap   = "192.168.127.2/24"
-	mac       = "ba:aa:ad:c0:ff:ee"
-	ifaceLo   = "lo"
-	ifaceTap  = "tap0"
-)
+var ourWaterParams = water.PlatformSpecificParams{
+	Name:       ifaceTap,
+	MultiQueue: true,
+}
 
 // configureLoIface assigns an IP address to the loopback interface.
 func configureLoIface() error {
