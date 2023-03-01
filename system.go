@@ -9,6 +9,12 @@ import (
 const (
 	defaultFdCur = 65536
 	defaultFdMax = 65536
+	defaultGw    = "192.168.127.1"
+	addrLo       = "127.0.0.1/8"
+	addrTap      = "192.168.127.2/24"
+	mac          = "ba:aa:ad:c0:ff:ee"
+	ifaceLo      = "lo"
+	ifaceTap     = "tap0"
 )
 
 var errTooMuchToRead = errors.New("reached read limit")
