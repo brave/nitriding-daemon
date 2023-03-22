@@ -1,4 +1,8 @@
-# Nitriding
+<div align="center">
+  <img src="./doc/nitriding-logo.svg" alt="Nitriding logo" width="250">
+</div>
+
+---
 
 [![GoDoc](https://pkg.go.dev/badge/github.com/brave/nitriding?utm_source=godoc)](https://pkg.go.dev/github.com/brave/nitriding)
 
