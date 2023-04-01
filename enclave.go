@@ -79,7 +79,7 @@ type Config struct {
 	FQDN string
 
 	// ExtPort contains the VSOCK-facing TCP port that the Web server should
-	// listen on, e.g.  8443.  This port is not *directly* reachable by the
+	// listen on, e.g. 443.  This port is not *directly* reachable by the
 	// Internet but the EC2 host's proxy *does* forward Internet traffic to
 	// this port.  This field is required.
 	ExtPort uint16

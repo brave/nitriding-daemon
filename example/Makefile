@@ -22,7 +22,7 @@ kill:
 	@if [ "$(ENCLAVE_ID)" != "null" ]; then nitro-cli terminate-enclave --enclave-id $(ENCLAVE_ID); fi
 
 run:
-	nitro-cli run-enclave --cpu-count 2 --memory 4000 --enclave-cid 4 --eif-path $(enclave_image) --debug-mode
+	nitro-cli run-enclave --cpu-count 2 --memory 512 --enclave-cid 4 --eif-path $(enclave_image) --debug-mode
 	nitro-cli console --enclave-id $$(nitro-cli describe-enclaves | jq -r '.[0].EnclaveID')
 
 clean:

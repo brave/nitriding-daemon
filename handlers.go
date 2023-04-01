@@ -64,7 +64,7 @@ func reqSyncHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		// The 'addr' parameter must have the following form:
-		// https://example.com:8443
+		// https://example.com:443
 		addrs, ok := q["addr"]
 		if !ok {
 			http.Error(w, errNoAddr.Error(), http.StatusBadRequest)

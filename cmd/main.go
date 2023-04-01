@@ -24,7 +24,7 @@ func main() {
 		"Code repository of the enclave application (e.g., \"github.com/foo/bar\").")
 	flag.StringVar(&appWebSrv, "appwebsrv", "",
 		"Enclave-internal HTTP server of the enclave application (e.g., \"http://127.0.0.1:8081\").")
-	flag.UintVar(&extPort, "extport", 8443,
+	flag.UintVar(&extPort, "extport", 443,
 		"Nitriding's VSOCK-facing HTTPS port.  Must match port forwarding rules on EC2 host.")
 	flag.UintVar(&intPort, "intport", 8080,
 		"Nitriding's enclave-internal HTTP port.  Only used by the enclave application.")
