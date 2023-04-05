@@ -9,7 +9,7 @@ lint:
 	golangci-lint run
 
 $(binary): $(godeps)
-	CGO_ENABLED=0 go build -o $(binary)
+	CGO_ENABLED=0 go build -buildvcs=false -o $(binary)
 
 clean:
 	rm -f $(binary)
