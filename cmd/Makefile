@@ -9,7 +9,7 @@ lint:
 	golangci-lint run
 
 $(binary): $(godeps)
-	CGO_ENABLED=0 go build -buildvcs=false -o $(binary)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -buildvcs=false -o $(binary)
 
 clean:
 	rm -f $(binary)

@@ -1,29 +1,38 @@
-.PHONY: all docker enclave kill run clean
+prog := python-enclave
+version := $(shell git describe --tag --dirty)
+image_tag := $(prog):$(version)
+image_tar := $(prog)-$(version)-kaniko.tar
+image_eif := $(image_tar:%.tar=%.eif)
 
-docker_image = python-test
-enclave_image = $(docker_image).eif
-godeps = ../cmd/*.go ../*.go ../go.mod ../go.sum
-binary = nitriding
+.PHONY: all
+all: run
 
-all: $(binary) docker enclave kill run
+.PHONY: image
+image: $(image_tar)
 
-$(binary): $(godeps)
-	make -C ../cmd/
-	cp ../cmd/nitriding .
+$(image_tar): Dockerfile service.py start.sh
+	docker run \
+		-v $(PWD):/workspace \
+		gcr.io/kaniko-project/executor:v1.9.2 \
+		--reproducible \
+		--no-push \
+		--tarPath $(image_tar) \
+		--destination $(image_tag) \
+		--custom-platform linux/amd64
 
-docker: Dockerfile
-	docker build -t $(docker_image):latest .
+$(image_eif): $(image_tar)
+	docker load -i $<
+	nitro-cli build-enclave \
+		--docker-uri $(image_tag) \
+		--output-file $(image_eif)
 
-enclave:
-	nitro-cli build-enclave --docker-uri $(docker_image):latest --output-file $(enclave_image)
+.PHONY: run
+run: $(image_eif)
+	# Terminate already-running enclave.
+	nitro-cli terminate-enclave --all
+	# Start our proxy and the enclave.
+	./run-enclave.sh $(image_eif)
 
-kill:
-	$(eval ENCLAVE_ID=$(shell nitro-cli describe-enclaves | jq -r '.[0].EnclaveID'))
-	@if [ "$(ENCLAVE_ID)" != "null" ]; then nitro-cli terminate-enclave --enclave-id $(ENCLAVE_ID); fi
-
-run:
-	nitro-cli run-enclave --cpu-count 2 --memory 512 --enclave-cid 4 --eif-path $(enclave_image) --debug-mode
-	nitro-cli console --enclave-id $$(nitro-cli describe-enclaves | jq -r '.[0].EnclaveID')
-
+.PHONY: clean
 clean:
-	rm -f $(binary)
+	rm -f $(image_tar) $(image_eif)
