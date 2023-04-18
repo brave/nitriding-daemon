@@ -1,10 +1,22 @@
-FROM alpine:latest
+# A Go base image is enough to build nitriding reproducibly.
+# We use a specific instead of the latest image to ensure reproducibility.
+FROM golang:1.20 as builder
 
-RUN mkdir -p /lib64 && ln -sf /lib/libc.musl-x86_64.so.1 /lib64/ld-linux-x86-64.so.2
-RUN apk add --no-cache py3-requests
+WORKDIR /
 
-COPY nitriding /
-COPY service.py /
-COPY start.sh /
+# Clone the repository and build the stand-alone nitriding executable.
+RUN git clone https://github.com/brave/nitriding.git
+RUN make -C nitriding/cmd/ nitriding
 
-CMD ["/start.sh"]
+# Use the intermediate builder image to add our files.  This is necessary to
+# avoid intermediate layers that contain inconsistent file permissions.
+COPY service.py start.sh /bin/
+RUN chown root:root /bin/service.py /bin/start.sh
+RUN chmod 0755      /bin/service.py /bin/start.sh
+
+FROM python:3.11-slim-bullseye
+
+# Copy all our files to the final image.
+COPY --from=builder /nitriding/cmd/nitriding /bin/start.sh /bin/service.py /bin/
+
+CMD ["start.sh"]

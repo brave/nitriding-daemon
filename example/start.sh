@@ -1,9 +1,9 @@
 #!/bin/sh
 
-/nitriding -fqdn example.com  -extport 443  -intport 8080 &
+nitriding -fqdn example.com -extport 443 -intport 8080 &
 echo "[sh] Started nitriding."
 
 sleep 1
 
-/service.py
+service.py
 echo "[sh] Ran Python script."
