@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"flag"
+	"io"
 	"log"
 	"math"
 	"net/url"
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/brave/nitriding"
 )
@@ -13,7 +17,7 @@ import (
 var l = log.New(os.Stderr, "nitriding-cmd: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
 
 func main() {
-	var fqdn, appURL, appWebSrv string
+	var fqdn, appURL, appWebSrv, appCmd string
 	var extPort, intPort, hostProxyPort uint
 	var useACME, waitForApp, debug bool
 	var err error
@@ -24,6 +28,8 @@ func main() {
 		"Code repository of the enclave application (e.g., \"github.com/foo/bar\").")
 	flag.StringVar(&appWebSrv, "appwebsrv", "",
 		"Enclave-internal HTTP server of the enclave application (e.g., \"http://127.0.0.1:8081\").")
+	flag.StringVar(&appCmd, "appcmd", "",
+		"Launch enclave application via the given command.")
 	flag.UintVar(&extPort, "extport", 443,
 		"Nitriding's VSOCK-facing HTTPS port.  Must match port forwarding rules on EC2 host.")
 	flag.UintVar(&intPort, "intport", 8080,
@@ -84,6 +90,65 @@ func main() {
 		l.Fatalf("Enclave terminated: %v", err)
 	}
 
-	// Block on this read forever.
-	<-make(chan struct{})
+	// Nitriding supports two ways of starting the enclave application:
+	//
+	// 1) Nitriding spawns the enclave application itself, and waits for it
+	//    to terminate.
+	//
+	// 2) The enclave application is started by a shell script (which also
+	//    starts nitriding).  In this case, we simply block forever.
+	if appCmd != "" {
+		f := func(s string) {
+			l.Printf("Application says: %s", s)
+		}
+		runAppCommand(appCmd, f, f)
+	} else {
+		// Block forever.
+		<-make(chan struct{})
+	}
+	l.Println("Exiting nitriding.")
+}
+
+// runAppCommand (i) runs the given command, (ii) waits until the command
+// finished execution, and (iii) in the meanwhile prints the command's stdout
+// and stderr.
+func runAppCommand(appCmd string, stdoutFunc, stderrFunc func(string)) {
+	l.Printf("Invoking the enclave application.")
+	args := strings.Split(appCmd, " ")
+	cmd := exec.Command(args[0], args[1:]...)
+
+	// Print the enclave application's stderr.
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		l.Fatalf("Failed to obtain stderr pipe for enclave application: %v", err)
+	}
+	go forwardOutput(stderr, stderrFunc, "stderr")
+
+	// Print the enclave application's stdout.
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		l.Fatalf("Failed to obtain stdout pipe for enclave application: %v", err)
+	}
+	go forwardOutput(stdout, stdoutFunc, "stdout")
+
+	if err := cmd.Start(); err != nil {
+		l.Fatalf("Failed to start enclave application: %v", err)
+	}
+
+	if err := cmd.Wait(); err != nil {
+		l.Fatalf("Enclave application exited with non-0 exit code: %v", err)
+	}
+	l.Println("Enclave application exited.")
+}
+
+// forwardOutput continuously reads from the given Reader until an EOF occurs.
+// Each newly read line is passed to the given function f.
+func forwardOutput(readCloser io.ReadCloser, f func(string), output string) {
+	scanner := bufio.NewScanner(readCloser)
+	for scanner.Scan() {
+		f(scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		l.Printf("Error reading from enclave application's %s: %v", output, err)
+	}
 }
