@@ -123,14 +123,14 @@ func runAppCommand(appCmd string, stdoutFunc, stderrFunc func(string)) {
 	if err != nil {
 		l.Fatalf("Failed to obtain stderr pipe for enclave application: %v", err)
 	}
-	go printOutput(stderr, stderrFunc, "stderr")
+	go forwardOutput(stderr, stderrFunc, "stderr")
 
 	// Print the enclave application's stdout.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		l.Fatalf("Failed to obtain stdout pipe for enclave application: %v", err)
 	}
-	go printOutput(stdout, stdoutFunc, "stdout")
+	go forwardOutput(stdout, stdoutFunc, "stdout")
 
 	if err := cmd.Start(); err != nil {
 		l.Fatalf("Failed to start enclave application: %v", err)
@@ -142,9 +142,9 @@ func runAppCommand(appCmd string, stdoutFunc, stderrFunc func(string)) {
 	l.Println("Enclave application exited.")
 }
 
-// printOutput continuously reads from the given Reader until an EOF occurs.
+// forwardOutput continuously reads from the given Reader until an EOF occurs.
 // Each newly read line is passed to the given function f.
-func printOutput(readCloser io.ReadCloser, f func(string), output string) {
+func forwardOutput(readCloser io.ReadCloser, f func(string), output string) {
 	r := bufio.NewReader(readCloser)
 	for {
 		b, err := r.ReadBytes(0x0a) // Read until we see a newline.
