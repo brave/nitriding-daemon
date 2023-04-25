@@ -40,7 +40,7 @@ nitriding.  The following steps are necessary.
    an application of kaniko.
 
 3. Bundle the freshly-compiled nitriding and your enclave application together
-   in a Dockerfile.  The nitriding stand-alone executable must be invoked
+   with a Dockerfile.  The nitriding stand-alone executable must be invoked
    first, followed by your application.  There are two ways to go about this.
    First, you can create a shell script that first starts nitriding in the
    background, followed by the enclave application.  [Here's an
