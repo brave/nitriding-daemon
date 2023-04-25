@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"flag"
 	"io"
 	"log"
@@ -145,17 +144,11 @@ func runAppCommand(appCmd string, stdoutFunc, stderrFunc func(string)) {
 // forwardOutput continuously reads from the given Reader until an EOF occurs.
 // Each newly read line is passed to the given function f.
 func forwardOutput(readCloser io.ReadCloser, f func(string), output string) {
-	r := bufio.NewReader(readCloser)
-	for {
-		b, err := r.ReadBytes(0x0a) // Read until we see a newline.
-		if errors.Is(err, io.EOF) {
-			l.Printf("Encountered EOF in %s.  Returning.", output)
-			return
-		}
-		if err != nil {
-			l.Printf("Failed to read from enclave application's %s: %v", output, err)
-			return
-		}
-		f(string(b))
+	scanner := bufio.NewScanner(readCloser)
+	for scanner.Scan() {
+		f(scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		l.Printf("Error reading from enclave application's %s: %v", output, err)
 	}
 }
