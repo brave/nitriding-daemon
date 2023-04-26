@@ -44,14 +44,6 @@ func rootHandler(cfg *Config) http.HandlerFunc {
 	}
 }
 
-// proxyHandler returns an HTTP handler that proxies HTTP requests to the
-// enclave-internal HTTP server of our enclave application.
-func proxyHandler(e *Enclave) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		e.revProxy.ServeHTTP(w, r)
-	}
-}
-
 // reqSyncHandler returns a handler that lets the enclave application request
 // state synchronization, which copies the given remote enclave's state into
 // our state.

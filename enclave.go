@@ -209,7 +209,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	// server.
 	if cfg.AppWebSrv != nil {
 		e.revProxy = httputil.NewSingleHostReverseProxy(cfg.AppWebSrv)
-		e.pubSrv.Handler.(*chi.Mux).Handle(pathProxy, proxyHandler(e))
+		e.pubSrv.Handler.(*chi.Mux).Handle(pathProxy, e.revProxy)
 	}
 
 	return e, nil
