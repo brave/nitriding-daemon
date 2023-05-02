@@ -1,4 +1,4 @@
-module github.com/brave/nitriding
+module github.com/brave/nitriding-daemon
 
 go 1.20
 
