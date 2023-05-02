@@ -4,7 +4,7 @@
 
 ---
 
-[![GoDoc](https://pkg.go.dev/badge/github.com/brave/nitriding?utm_source=godoc)](https://pkg.go.dev/github.com/brave/nitriding)
+[![GoDoc](https://pkg.go.dev/badge/github.com/brave/nitriding-daemon?utm_source=godoc)](https://pkg.go.dev/github.com/brave/nitriding-daemon)
 
 This Go tool kit makes it possible to run your application inside an
 [AWS Nitro Enclave](https://aws.amazon.com/ec2/nitro/nitro-enclaves/).
