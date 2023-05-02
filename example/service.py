@@ -14,7 +14,7 @@ def signal_ready():
 
 
 def fetch_addr():
-    url = "https://raw.githubusercontent.com/brave/nitriding/master/README.md"
+    url = "https://raw.githubusercontent.com/brave/nitriding-daemon/master/README.md"
     with urllib.request.urlopen(url) as f:
         print("[py] Fetched %d bytes of README.md." % len(f.read(100)))
 

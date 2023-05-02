@@ -51,7 +51,7 @@ func rootHandler(cfg *Config) http.HandlerFunc {
 // This is an enclave-internal endpoint that can only be accessed by the
 // trusted enclave application.
 //
-// FIXME: https://github.com/brave/nitriding/issues/44
+// FIXME: https://github.com/brave/nitriding-daemon/issues/10
 func reqSyncHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()

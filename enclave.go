@@ -188,7 +188,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	// Increase the maximum number of idle connections per host.  This is
 	// critical to boosting the requests per second that our reverse proxy can
 	// sustain.  See the following comment for more details:
-	// https://github.com/brave/nitriding/issues/45#issuecomment-1526012586
+	// https://github.com/brave/nitriding-daemon/issues/2#issuecomment-1530245059
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
 	http.DefaultTransport.(*http.Transport).MaxIdleConns = 100
 
