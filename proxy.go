@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/containers/gvisor-tap-vsock/pkg/transport"
-	"github.com/songgao/packets/ethernet"
 	"github.com/songgao/water"
 	"github.com/vishvananda/netlink"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -124,25 +123,18 @@ func linkUp() error {
 
 func rx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
 	elog.Println("Waiting for frames from enclave application.")
-	var frame ethernet.Frame
+	frame := make([]byte, mtu)
+	size := make([]byte, 2)
 	for {
-		frame.Resize(mtu)
 		n, err := tap.Read([]byte(frame))
 		if err != nil {
 			errCh <- fmt.Errorf("failed to read packet from TAP device: %w", err)
 			return
 		}
-		frame = frame[:n]
 
-		size := make([]byte, 2)
 		binary.LittleEndian.PutUint16(size, uint16(n))
-
-		if _, err := conn.Write(size); err != nil {
-			errCh <- fmt.Errorf("failed to write frame size to connection: %w", err)
-			return
-		}
-		if _, err := conn.Write(frame); err != nil {
-			errCh <- fmt.Errorf("failed to write frame to connection: %w", err)
+		if _, err := conn.Write(append(size, frame[:n]...)); err != nil {
+			errCh <- fmt.Errorf("failed to write size and frame to connection: %w", err)
 			return
 		}
 	}
@@ -150,11 +142,11 @@ func rx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
 
 func tx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
 	elog.Println("Waiting for frames from host.")
-	sizeBuf := make([]byte, 2)
+	size := make([]byte, 2)
 	buf := make([]byte, mtu+header.EthernetMinimumSize)
 
 	for {
-		n, err := io.ReadFull(conn, sizeBuf)
+		n, err := io.ReadFull(conn, size)
 		if err != nil {
 			errCh <- fmt.Errorf("failed to read frame size from connection: %w", err)
 			return
@@ -163,7 +155,7 @@ func tx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
 			errCh <- fmt.Errorf("received unexpected frame size %d", n)
 			return
 		}
-		size := int(binary.LittleEndian.Uint16(sizeBuf[0:2]))
+		size := int(binary.LittleEndian.Uint16(size[0:2]))
 
 		n, err = io.ReadFull(conn, buf[:size])
 		if err != nil {
