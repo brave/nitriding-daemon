@@ -189,8 +189,8 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	// critical to boosting the requests per second that our reverse proxy can
 	// sustain.  See the following comment for more details:
 	// https://github.com/brave/nitriding-daemon/issues/2#issuecomment-1530245059
-	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
-	http.DefaultTransport.(*http.Transport).MaxIdleConns = 100
+	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 500
+	http.DefaultTransport.(*http.Transport).MaxIdleConns = 500
 
 	if cfg.Debug {
 		e.pubSrv.Handler.(*chi.Mux).Use(middleware.Logger)

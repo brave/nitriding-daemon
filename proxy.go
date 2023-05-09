@@ -12,14 +12,13 @@ import (
 	"time"
 
 	"github.com/containers/gvisor-tap-vsock/pkg/transport"
-	"github.com/songgao/packets/ethernet"
 	"github.com/songgao/water"
 	"github.com/vishvananda/netlink"
-	"gvisor.dev/gvisor/pkg/tcpip/header"
 )
 
 var (
-	mtu = 4000
+	frameLen     = 0xffff
+	frameSizeLen = 2
 )
 
 // runNetworking calls the function that sets up our networking environment.
@@ -92,8 +91,8 @@ func setupNetworking(c *Config, stop chan bool) error {
 
 	// Spawn goroutines that forward traffic.
 	errCh := make(chan error, 1)
-	go tx(conn, tap, errCh, mtu)
-	go rx(conn, tap, errCh, mtu)
+	go tx(conn, tap, errCh)
+	go rx(conn, tap, errCh)
 	elog.Println("Started goroutines to forward traffic.")
 	select {
 	case err := <-errCh:
@@ -122,61 +121,64 @@ func linkUp() error {
 	return netlink.LinkSetUp(link)
 }
 
-func rx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
+func rx(conn net.Conn, tap *water.Interface, errCh chan error) {
 	elog.Println("Waiting for frames from enclave application.")
-	var frame ethernet.Frame
+	buf := make([]byte, frameSizeLen+frameLen) // Two bytes for the frame length plus the frame itself
+
 	for {
-		frame.Resize(mtu)
-		n, err := tap.Read([]byte(frame))
+		n, err := tap.Read([]byte(buf[frameSizeLen:]))
 		if err != nil {
-			errCh <- fmt.Errorf("failed to read packet from TAP device: %w", err)
+			errCh <- fmt.Errorf("failed to read payload from enclave application: %w", err)
 			return
 		}
-		frame = frame[:n]
 
-		size := make([]byte, 2)
-		binary.LittleEndian.PutUint16(size, uint16(n))
-
-		if _, err := conn.Write(size); err != nil {
-			errCh <- fmt.Errorf("failed to write frame size to connection: %w", err)
+		binary.LittleEndian.PutUint16(buf[:frameSizeLen], uint16(n))
+		m, err := conn.Write(buf[:frameSizeLen+n])
+		if err != nil {
+			errCh <- fmt.Errorf("failed to write payload to host: %w", err)
 			return
 		}
-		if _, err := conn.Write(frame); err != nil {
-			errCh <- fmt.Errorf("failed to write frame to connection: %w", err)
+		m = m - frameSizeLen
+		if m != n {
+			errCh <- fmt.Errorf("wrote %d instead of %d bytes to host", m, n)
 			return
 		}
 	}
 }
 
-func tx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
+func tx(conn net.Conn, tap *water.Interface, errCh chan error) {
 	elog.Println("Waiting for frames from host.")
-	sizeBuf := make([]byte, 2)
-	buf := make([]byte, mtu+header.EthernetMinimumSize)
+	buf := make([]byte, frameSizeLen+frameLen) // Two bytes for the frame length plus the frame itself
 
 	for {
-		n, err := io.ReadFull(conn, sizeBuf)
+		n, err := io.ReadFull(conn, buf[:frameSizeLen])
 		if err != nil {
-			errCh <- fmt.Errorf("failed to read frame size from connection: %w", err)
+			errCh <- fmt.Errorf("failed to read length from host: %w", err)
 			return
 		}
-		if n != 2 {
-			errCh <- fmt.Errorf("received unexpected frame size %d", n)
+		if n != frameSizeLen {
+			errCh <- fmt.Errorf("received unexpected length %d", n)
 			return
 		}
-		size := int(binary.LittleEndian.Uint16(sizeBuf[0:2]))
+		size := int(binary.LittleEndian.Uint16(buf[:frameSizeLen]))
 
-		n, err = io.ReadFull(conn, buf[:size])
+		n, err = io.ReadFull(conn, buf[frameSizeLen:size+frameSizeLen])
 		if err != nil {
-			errCh <- fmt.Errorf("failed to read frame from connection: %w", err)
+			errCh <- fmt.Errorf("failed to read payload from host: %w", err)
 			return
 		}
 		if n == 0 || n != size {
-			errCh <- fmt.Errorf("expected frame of size %d but got %d", size, n)
+			errCh <- fmt.Errorf("expected payload of size %d but got %d", size, n)
 			return
 		}
 
-		if _, err := tap.Write(buf[:size]); err != nil {
-			errCh <- fmt.Errorf("failed to write frame to TAP device: %w", err)
+		m, err := tap.Write(buf[frameSizeLen : n+frameSizeLen])
+		if err != nil {
+			errCh <- fmt.Errorf("failed to write payload to enclave application: %w", err)
+			return
+		}
+		if m != n {
+			errCh <- fmt.Errorf("wrote %d instead of %d bytes to host", m, n)
 			return
 		}
 	}
