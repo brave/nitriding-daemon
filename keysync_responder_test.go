@@ -82,11 +82,11 @@ func TestRespSyncHandlerForBadReqs(t *testing.T) {
 
 	// Send non-Base64 bogus data.
 	res = queryHandler(respSyncHandler(enclave), pathSync, strings.NewReader("foobar!"))
-	expect(t, res, http.StatusInternalServerError, errNoBase64.Error())
+	assertResponse(t, res, newResp(http.StatusInternalServerError, errNoBase64.Error()))
 
 	// Send Base64-encoded bogus data.
 	res = queryHandler(respSyncHandler(enclave), pathSync, strings.NewReader("Zm9vYmFyCg=="))
-	expect(t, res, http.StatusUnauthorized, errFailedVerify.Error())
+	assertResponse(t, res, newResp(http.StatusUnauthorized, errFailedVerify.Error()))
 }
 
 func TestRespSyncHandler(t *testing.T) {
@@ -103,7 +103,7 @@ func TestRespSyncHandler(t *testing.T) {
 	res = queryHandler(respSyncHandler(enclave), pathSync, strings.NewReader(initAttInfo.attDoc))
 	// On a non-enclave platform, the responder code will get as far as to
 	// request its attestation document.
-	expect(t, res, http.StatusInternalServerError, errFailedAttestation)
+	assertResponse(t, res, newResp(http.StatusInternalServerError, errFailedAttestation))
 }
 
 func TestRespSyncHandlerDoS(t *testing.T) {
@@ -114,7 +114,7 @@ func TestRespSyncHandlerDoS(t *testing.T) {
 	maxSize := base64.StdEncoding.EncodedLen(maxAttDocLen)
 	body := make([]byte, maxSize+1)
 	res = queryHandler(respSyncHandler(enclave), pathSync, bytes.NewReader(body))
-	expect(t, res, http.StatusInternalServerError, errFailedRespBody.Error())
+	assertResponse(t, res, newResp(http.StatusInternalServerError, errFailedRespBody.Error()))
 }
 
 var initAttInfo = &remoteAttInfo{

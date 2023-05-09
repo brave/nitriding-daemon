@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 
@@ -85,8 +86,11 @@ func (m *metrics) checkRevProxyErr(w http.ResponseWriter, r *http.Request, err e
 // middleware implements a chi middleware that records each request as part of
 // our Prometheus metrics.
 func (m *metrics) middleware(h http.Handler) http.Handler {
+	buf := new(bytes.Buffer)
 	f := func(w http.ResponseWriter, r *http.Request) {
+		buf.Reset()
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		ww.Tee(buf)
 		h.ServeHTTP(ww, r)
 		m.reqs.With(prometheus.Labels{
 			reqPath:    r.URL.Path,

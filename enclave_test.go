@@ -19,7 +19,7 @@ var defaultCfg = Config{
 func assertEqual(t *testing.T, is, should interface{}) {
 	t.Helper()
 	if should != is {
-		t.Fatalf("Expected value %v but got %v.", should, is)
+		t.Fatalf("Expected value\n%v\nbut got\n%v", should, is)
 	}
 }
 
