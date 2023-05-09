@@ -239,3 +239,15 @@ func TestReadyHandler(t *testing.T) {
 		t.Fatalf("Expected status code %d but got %d.", http.StatusOK, resp.StatusCode)
 	}
 }
+
+func TestAttestationHandlerWhileProfiling(t *testing.T) {
+	cfg := defaultCfg
+	cfg.UseProfiling = true
+	e := createEnclave(&cfg)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, pathAttestation, nil)
+	e.pubSrv.Handler.ServeHTTP(rec, req)
+	// Ensure that the attestation handler aborts if profiling is enabled.
+	expect(t, rec.Result(), http.StatusServiceUnavailable, errProfilingSet)
+}

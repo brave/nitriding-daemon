@@ -34,7 +34,7 @@ func expect(t *testing.T, resp *http.Response, statusCode int, errMsg string) {
 }
 
 func testReq(t *testing.T, req *http.Request, statusCode int, errMsg string) {
-	attestationHandler := attestationHandler(&AttestationHashes{})
+	attestationHandler := attestationHandler(false, &AttestationHashes{})
 	rec := httptest.NewRecorder()
 	attestationHandler(rec, req)
 	expect(t, rec.Result(), statusCode, errMsg)

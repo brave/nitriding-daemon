@@ -16,6 +16,13 @@ var defaultCfg = Config{
 	WaitForApp:    true,
 }
 
+func assertEqual(t *testing.T, is, should interface{}) {
+	t.Helper()
+	if should != is {
+		t.Fatalf("Expected value %v but got %v.", should, is)
+	}
+}
+
 func createEnclave(cfg *Config) *Enclave {
 	e, err := NewEnclave(cfg)
 	if err != nil {

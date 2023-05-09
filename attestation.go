@@ -30,6 +30,7 @@ var (
 	errNoNonce           = "could not find nonce in URL query parameters"
 	errBadNonceFormat    = fmt.Sprintf("unexpected nonce format; must be %d-digit hex string", nonceNumDigits)
 	errFailedAttestation = "failed to obtain attestation document from hypervisor"
+	errProfilingSet      = "attestation disabled because profiling is enabled"
 	nonceRegExp          = fmt.Sprintf("[a-f0-9]{%d}", nonceNumDigits)
 
 	// getPCRValues is a variable pointing to a function that returns PCR
@@ -58,15 +59,21 @@ func (a *AttestationHashes) Serialize() []byte {
 	return []byte(str)
 }
 
-// attestationHandler takes as input an AttestationHashes struct and returns a
-// HandlerFunc.  This HandlerFunc expects a nonce in the URL query parameters
-// and subsequently asks its hypervisor for an attestation document that
-// contains both the nonce and the hashes in the given struct.  The resulting
+// attestationHandler takes as input a flag indicating if profiling is enabled
+// and an AttestationHashes struct, and returns a HandlerFunc.  If profiling is
+// enabled, we abort attestation because profiling leaks enclave-internal data.
+// The returned HandlerFunc expects a nonce in the URL query parameters and
+// subsequently asks its hypervisor for an attestation document that contains
+// both the nonce and the hashes in the given struct.  The resulting
 // Base64-encoded attestation document is then returned to the requester.
-func attestationHandler(hashes *AttestationHashes) http.HandlerFunc {
+func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, errMethodNotGET, http.StatusMethodNotAllowed)
+			return
+		}
+		if useProfiling {
+			http.Error(w, errProfilingSet, http.StatusServiceUnavailable)
 			return
 		}
 		if err := r.ParseForm(); err != nil {
