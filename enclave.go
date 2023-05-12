@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -50,6 +51,7 @@ const (
 	pathHash        = "/enclave/hash"
 	pathReady       = "/enclave/ready"
 	pathProfiling   = "/enclave/debug"
+	pathConfig      = "/enclave/config"
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
@@ -168,6 +170,15 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// String returns a string representation of the enclave's configuration.
+func (c *Config) String() string {
+	s, err := json.MarshalIndent(c, "", "\t")
+	if err != nil {
+		return "failed to marshal enclave config"
+	}
+	return string(s)
+}
+
 // init is called once, at package initialization time.
 func init() {
 	var err error
@@ -234,6 +245,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	m.Get(pathNonce, nonceHandler(e))
 	m.Get(pathRoot, rootHandler(e.cfg))
 	m.Post(pathSync, respSyncHandler(e))
+	m.Get(pathConfig, configHandler(e.cfg))
 
 	// Register enclave-internal HTTP API.
 	m = e.privSrv.Handler.(*chi.Mux)

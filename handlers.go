@@ -174,3 +174,11 @@ func readyHandler(e *Enclave) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 	}
 }
+
+// configHandler returns an HTTP handler that prints the enclave's
+// configuration.
+func configHandler(cfg *Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, cfg)
+	}
+}
