@@ -172,7 +172,7 @@ func (c *Config) Validate() error {
 
 // String returns a string representation of the enclave's configuration.
 func (c *Config) String() string {
-	s, err := json.MarshalIndent(c, "", "\t")
+	s, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return "failed to marshal enclave config"
 	}
