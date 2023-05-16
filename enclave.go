@@ -234,6 +234,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	}
 	if cfg.PrometheusPort > 0 {
 		e.pubSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
+		e.privSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
 	}
 	if cfg.UseProfiling {
 		e.pubSrv.Handler.(*chi.Mux).Mount(pathProfiling, middleware.Profiler())
