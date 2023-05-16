@@ -55,13 +55,17 @@ func (m *metrics) checkRevProxyResp(resp *http.Response) error {
 
 // checkRevProxyErr captures Prometheus metrics for errors that occurred when
 // we tried to talk to the enclave application backend.
-func (m *metrics) checkRevProxyErr(_ http.ResponseWriter, r *http.Request, err error) {
+func (m *metrics) checkRevProxyErr(w http.ResponseWriter, r *http.Request, err error) {
 	m.proxiedReqs.With(prometheus.Labels{
 		reqPath:    r.URL.Path,
 		reqMethod:  r.Method,
 		respStatus: notAvailable,
 		respErr:    err.Error(),
 	}).Inc()
+	// Tell the client that we couldn't reach the backend.  This is going to
+	// result in another increase of proxiedReqs because the middleware below
+	// is going to handle this request.
+	w.WriteHeader(http.StatusBadGateway)
 }
 
 // middleware implements a chi middleware that records each request as part of

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -22,9 +23,10 @@ func TestMetrics(t *testing.T) {
 		t.Fatalf("Failed to create new HTTP request: %v", err)
 	}
 
-	m.checkRevProxyErr(nil, req, err1)
-	m.checkRevProxyErr(nil, req, err1)
-	m.checkRevProxyErr(nil, req, err2)
+	r := httptest.NewRecorder()
+	m.checkRevProxyErr(r, req, err1)
+	m.checkRevProxyErr(r, req, err1)
+	m.checkRevProxyErr(r, req, err2)
 
 	labels := m.proxiedReqs.WithLabelValues
 	assertEqual(t, testutil.ToFloat64(labels(
