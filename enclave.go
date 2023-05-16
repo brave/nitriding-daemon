@@ -330,7 +330,7 @@ func (e *Enclave) Stop() error {
 func startWebServers(e *Enclave) error {
 	if e.cfg.PrometheusPort > 0 {
 		elog.Printf("Starting Prometheus Web server (%s).", e.promSrv.Addr)
-		go e.promSrv.ListenAndServe() //nolint:errcheck
+		go e.promSrv.ListenAndServeTLS("", "") //nolint:errcheck
 	}
 
 	elog.Printf("Starting public (%s) and private (%s) Web servers.", e.pubSrv.Addr, e.privSrv.Addr)
@@ -411,6 +411,9 @@ func (e *Enclave) genSelfSignedCert() error {
 	e.pubSrv.TLSConfig = &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
+	if e.cfg.PrometheusPort > 0 {
+		e.promSrv.TLSConfig = e.pubSrv.TLSConfig // Both servers share a TLS config.
+	}
 
 	return nil
 }
@@ -440,6 +443,9 @@ func (e *Enclave) setupAcme() error {
 		HostPolicy: autocert.HostWhitelist([]string{e.cfg.FQDN}...),
 	}
 	e.pubSrv.TLSConfig = certManager.TLSConfig()
+	if e.cfg.PrometheusPort > 0 {
+		e.promSrv.TLSConfig = e.pubSrv.TLSConfig // Both servers share a TLS config.
+	}
 
 	go func() {
 		var rawData []byte
