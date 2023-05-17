@@ -21,22 +21,32 @@ const (
 
 // metrics contains our Prometheus metrics.
 type metrics struct {
+	reqs        *prometheus.CounterVec
 	proxiedReqs *prometheus.CounterVec
 }
 
 // newMetrics initializes our Prometheus metrics.
 func newMetrics(reg prometheus.Registerer) *metrics {
 	m := &metrics{
+		reqs: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "requests",
+				Help:      "HTTP requests to nitriding",
+			},
+			[]string{reqPath, reqMethod, respStatus, respErr},
+		),
 		proxiedReqs: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
-				Name:      "proxy_responses",
-				Help:      "HTTP responses of the enclave application backend",
+				Name:      "proxied_requests",
+				Help:      "HTTP requests proxied to the enclave application",
 			},
 			[]string{reqPath, reqMethod, respStatus, respErr},
 		),
 	}
 	reg.MustRegister(m.proxiedReqs)
+	reg.MustRegister(m.reqs)
 
 	opts := collectors.ProcessCollectorOpts{
 		Namespace: namespace,
@@ -81,7 +91,7 @@ func (m *metrics) middleware(h http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		h.ServeHTTP(ww, r)
-		m.proxiedReqs.With(prometheus.Labels{
+		m.reqs.With(prometheus.Labels{
 			reqPath:    r.URL.Path,
 			reqMethod:  r.Method,
 			respStatus: fmt.Sprint(ww.Status()),
