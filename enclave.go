@@ -330,11 +330,21 @@ func (e *Enclave) Stop() error {
 func startWebServers(e *Enclave) error {
 	if e.cfg.PrometheusPort > 0 {
 		elog.Printf("Starting Prometheus Web server (%s).", e.promSrv.Addr)
-		go e.promSrv.ListenAndServeTLS("", "") //nolint:errcheck
+		go func() {
+			err := e.promSrv.ListenAndServeTLS("", "")
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				elog.Fatalf("Prometheus Web server error: %v", err)
+			}
+		}()
 	}
 
 	elog.Printf("Starting public (%s) and private (%s) Web servers.", e.pubSrv.Addr, e.privSrv.Addr)
-	go e.privSrv.ListenAndServe() //nolint:errcheck
+	go func() {
+		err := e.privSrv.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			elog.Fatalf("Private Web server error: %v", err)
+		}
+	}()
 	go func() {
 		// If desired, don't launch our Internet-facing Web server until the
 		// application signalled that it's ready.
@@ -342,7 +352,10 @@ func startWebServers(e *Enclave) error {
 			<-e.ready
 			elog.Println("Application signalled that it's ready.  Starting public Web server.")
 		}
-		e.pubSrv.ListenAndServeTLS("", "") //nolint:errcheck
+		err := e.pubSrv.ListenAndServeTLS("", "")
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			elog.Fatalf("Public Web server error: %v", err)
+		}
 	}()
 
 	return nil
