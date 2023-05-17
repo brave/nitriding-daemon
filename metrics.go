@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/middleware"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
 const (
@@ -36,6 +37,12 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		),
 	}
 	reg.MustRegister(m.proxiedReqs)
+
+	opts := collectors.ProcessCollectorOpts{
+		Namespace: namespace,
+	}
+	reg.MustRegister(collectors.NewProcessCollector(opts))
+	reg.MustRegister(collectors.NewGoCollector())
 
 	return m
 }
