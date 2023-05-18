@@ -18,8 +18,8 @@ var l = log.New(os.Stderr, "nitriding-cmd: ", log.Ldate|log.Ltime|log.LUTC|log.L
 
 func main() {
 	var fqdn, appURL, appWebSrv, appCmd string
-	var extPort, intPort, hostProxyPort uint
-	var useACME, waitForApp, debug bool
+	var extPort, intPort, hostProxyPort, prometheusPort uint
+	var useACME, waitForApp, useProfiling, debug bool
 	var err error
 
 	flag.StringVar(&fqdn, "fqdn", "",
@@ -36,6 +36,10 @@ func main() {
 		"Nitriding's enclave-internal HTTP port.  Only used by the enclave application.")
 	flag.UintVar(&hostProxyPort, "host-proxy-port", 1024,
 		"Port of proxy application running on EC2 host.")
+	flag.UintVar(&prometheusPort, "prometheus-port", 0,
+		"Port to expose Prometheus metrics at.")
+	flag.BoolVar(&useProfiling, "profile", false,
+		"Enable pprof profiling.  Only useful for debugging and must not be used in production.")
 	flag.BoolVar(&useACME, "acme", false,
 		"Use Let's Encrypt's ACME to fetch HTTPS certificate.")
 	flag.BoolVar(&waitForApp, "wait-for-app", false,
@@ -56,15 +60,20 @@ func main() {
 	if hostProxyPort < 1 || hostProxyPort > math.MaxUint32 {
 		l.Fatalf("-host-proxy-port must be in interval [1, %d]", math.MaxUint32)
 	}
+	if prometheusPort > math.MaxUint16 {
+		l.Fatalf("-prometheus-port must be in interval [1, %d]", math.MaxUint16)
+	}
 
 	c := &nitriding.Config{
-		FQDN:          fqdn,
-		ExtPort:       uint16(extPort),
-		IntPort:       uint16(intPort),
-		HostProxyPort: uint32(hostProxyPort),
-		UseACME:       useACME,
-		WaitForApp:    waitForApp,
-		Debug:         debug,
+		FQDN:           fqdn,
+		ExtPort:        uint16(extPort),
+		IntPort:        uint16(intPort),
+		PrometheusPort: uint16(prometheusPort),
+		HostProxyPort:  uint32(hostProxyPort),
+		UseACME:        useACME,
+		WaitForApp:     waitForApp,
+		UseProfiling:   useProfiling,
+		Debug:          debug,
 	}
 	if appURL != "" {
 		u, err := url.Parse(appURL)

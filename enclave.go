@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httputil"
+	_ "net/http/pprof"
 	"net/url"
 	"os"
 	"sync"
@@ -25,6 +27,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/brave/nitriding-daemon/randseed"
 	"golang.org/x/crypto/acme/autocert"
@@ -46,6 +50,8 @@ const (
 	pathSync        = "/enclave/sync"
 	pathHash        = "/enclave/hash"
 	pathReady       = "/enclave/ready"
+	pathProfiling   = "/enclave/debug"
+	pathConfig      = "/enclave/config"
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
@@ -62,13 +68,17 @@ var (
 // Enclave represents a service running inside an AWS Nitro Enclave.
 type Enclave struct {
 	sync.RWMutex
-	cfg             *Config
-	pubSrv, privSrv http.Server
-	revProxy        *httputil.ReverseProxy
-	hashes          *AttestationHashes
-	nonceCache      *cache
-	keyMaterial     any
-	ready, stop     chan bool
+	cfg          *Config
+	pubSrv       *http.Server
+	privSrv      *http.Server
+	promSrv      *http.Server
+	revProxy     *httputil.ReverseProxy
+	hashes       *AttestationHashes
+	promRegistry *prometheus.Registry
+	metrics      *metrics
+	nonceCache   *cache
+	keyMaterial  any
+	ready, stop  chan bool
 }
 
 // Config represents the configuration of our enclave service.
@@ -93,6 +103,16 @@ type Config struct {
 	// the EC2 host.  Note that VSOCK ports are 32 bits large.  This field is
 	// required.
 	HostProxyPort uint32
+
+	// PrometheusPort contains the TCP port of the Web server that exposes
+	// Prometheus metrics.  Prometheus metrics only reveal coarse-grained
+	// information and are safe to export in production.
+	PrometheusPort uint16
+
+	// UseProfiling enables profiling via pprof.  Profiling information will be
+	// available at /enclave/debug.  Note that profiling data is privacy
+	// sensitive and therefore must not be enabled in production.
+	UseProfiling bool
 
 	// UseACME must be set to true if you want your enclave application to
 	// request a Let's Encrypt-signed certificate.  If this is set to false,
@@ -150,6 +170,15 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// String returns a string representation of the enclave's configuration.
+func (c *Config) String() string {
+	s, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return "failed to marshal enclave config"
+	}
+	return string(s)
+}
+
 // init is called once, at package initialization time.
 func init() {
 	var err error
@@ -169,20 +198,27 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		return nil, fmt.Errorf("failed to create enclave: %w", err)
 	}
 
+	reg := prometheus.NewRegistry()
 	e := &Enclave{
 		cfg: cfg,
-		pubSrv: http.Server{
+		pubSrv: &http.Server{
 			Addr:    fmt.Sprintf(":%d", cfg.ExtPort),
 			Handler: chi.NewRouter(),
 		},
-		privSrv: http.Server{
+		privSrv: &http.Server{
 			Addr:    fmt.Sprintf("127.0.0.1:%d", cfg.IntPort),
 			Handler: chi.NewRouter(),
 		},
-		nonceCache: newCache(defaultItemExpiry),
-		hashes:     new(AttestationHashes),
-		stop:       make(chan bool),
-		ready:      make(chan bool),
+		promSrv: &http.Server{
+			Addr:    fmt.Sprintf(":%d", cfg.PrometheusPort),
+			Handler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}),
+		},
+		promRegistry: reg,
+		metrics:      newMetrics(reg),
+		nonceCache:   newCache(defaultItemExpiry),
+		hashes:       new(AttestationHashes),
+		stop:         make(chan bool),
+		ready:        make(chan bool),
 	}
 
 	// Increase the maximum number of idle connections per host.  This is
@@ -196,13 +232,21 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		e.pubSrv.Handler.(*chi.Mux).Use(middleware.Logger)
 		e.privSrv.Handler.(*chi.Mux).Use(middleware.Logger)
 	}
+	if cfg.PrometheusPort > 0 {
+		e.pubSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
+		e.privSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
+	}
+	if cfg.UseProfiling {
+		e.pubSrv.Handler.(*chi.Mux).Mount(pathProfiling, middleware.Profiler())
+	}
 
 	// Register public HTTP API.
 	m := e.pubSrv.Handler.(*chi.Mux)
-	m.Get(pathAttestation, attestationHandler(e.hashes))
+	m.Get(pathAttestation, attestationHandler(e.cfg.UseProfiling, e.hashes))
 	m.Get(pathNonce, nonceHandler(e))
 	m.Get(pathRoot, rootHandler(e.cfg))
 	m.Post(pathSync, respSyncHandler(e))
+	m.Get(pathConfig, configHandler(e.cfg))
 
 	// Register enclave-internal HTTP API.
 	m = e.privSrv.Handler.(*chi.Mux)
@@ -218,6 +262,12 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		e.revProxy = httputil.NewSingleHostReverseProxy(cfg.AppWebSrv)
 		e.revProxy.BufferPool = newBufPool()
 		e.pubSrv.Handler.(*chi.Mux).Handle(pathProxy, e.revProxy)
+		// If we expose Prometheus metrics, we keep track of the HTTP backend's
+		// responses.
+		if cfg.PrometheusPort > 0 {
+			e.revProxy.ModifyResponse = e.metrics.checkRevProxyResp
+			e.revProxy.ErrorHandler = e.metrics.checkRevProxyErr
+		}
 	}
 
 	return e, nil
@@ -269,15 +319,32 @@ func (e *Enclave) Stop() error {
 	if err := e.pubSrv.Shutdown(context.Background()); err != nil {
 		return err
 	}
+	if err := e.promSrv.Shutdown(context.Background()); err != nil {
+		return err
+	}
 	return nil
 }
 
-// startWebServers starts both our public-facing and our enclave-internal Web
-// server in a goroutine.
+// startWebServers starts our public-facing Web server, our enclave-internal
+// Web server, and -- if desired -- a Web server for profiling and/or metrics.
 func startWebServers(e *Enclave) error {
-	elog.Printf("Starting public (%s) and private (%s) Web server.", e.pubSrv.Addr, e.privSrv.Addr)
+	if e.cfg.PrometheusPort > 0 {
+		elog.Printf("Starting Prometheus Web server (%s).", e.promSrv.Addr)
+		go func() {
+			err := e.promSrv.ListenAndServeTLS("", "")
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				elog.Fatalf("Prometheus Web server error: %v", err)
+			}
+		}()
+	}
 
-	go e.privSrv.ListenAndServe() //nolint:errcheck
+	elog.Printf("Starting public (%s) and private (%s) Web servers.", e.pubSrv.Addr, e.privSrv.Addr)
+	go func() {
+		err := e.privSrv.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			elog.Fatalf("Private Web server error: %v", err)
+		}
+	}()
 	go func() {
 		// If desired, don't launch our Internet-facing Web server until the
 		// application signalled that it's ready.
@@ -285,7 +352,10 @@ func startWebServers(e *Enclave) error {
 			<-e.ready
 			elog.Println("Application signalled that it's ready.  Starting public Web server.")
 		}
-		e.pubSrv.ListenAndServeTLS("", "") //nolint:errcheck
+		err := e.pubSrv.ListenAndServeTLS("", "")
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			elog.Fatalf("Public Web server error: %v", err)
+		}
 	}()
 
 	return nil
@@ -354,6 +424,9 @@ func (e *Enclave) genSelfSignedCert() error {
 	e.pubSrv.TLSConfig = &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
+	if e.cfg.PrometheusPort > 0 {
+		e.promSrv.TLSConfig = e.pubSrv.TLSConfig // Both servers share a TLS config.
+	}
 
 	return nil
 }
@@ -383,6 +456,9 @@ func (e *Enclave) setupAcme() error {
 		HostPolicy: autocert.HostWhitelist([]string{e.cfg.FQDN}...),
 	}
 	e.pubSrv.TLSConfig = certManager.TLSConfig()
+	if e.cfg.PrometheusPort > 0 {
+		e.promSrv.TLSConfig = e.pubSrv.TLSConfig // Both servers share a TLS config.
+	}
 
 	go func() {
 		var rawData []byte
