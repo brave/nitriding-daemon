@@ -70,9 +70,9 @@ func main() {
 		IntPort:        uint16(intPort),
 		PrometheusPort: uint16(prometheusPort),
 		HostProxyPort:  uint32(hostProxyPort),
-		UseProfiling:   useProfiling,
 		UseACME:        useACME,
 		WaitForApp:     waitForApp,
+		UseProfiling:   useProfiling,
 		Debug:          debug,
 	}
 	if appURL != "" {
