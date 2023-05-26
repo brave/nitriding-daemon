@@ -63,7 +63,7 @@ nitriding.  The following steps are necessary.
    not use `-wait-for-app`.
 
 Finally, take a look at
-[this example application](example/)
+[this example application](/example)
 or 
 [this production application](https://github.com/brave/star-randsrv/)
 to learn how one can build on top of nitriding.
