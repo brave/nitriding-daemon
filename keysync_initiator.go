@@ -1,4 +1,4 @@
-package nitriding
+package main
 
 // AWS Nitro Enclave attestation documents contain three fields (called
 // "nonce", "user data",  and "public key") that can be set by the requester.

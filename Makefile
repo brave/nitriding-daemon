@@ -1,18 +1,19 @@
-.PHONY: all test lint clean
+binary = nitriding
+godeps = *.go go.mod go.sum
 
-binary = cmd/nitriding
-godeps = *.go go.mod go.sum cmd/*.go
+all: lint test $(binary)
 
-all: test lint $(binary)
-
-lint:
+.PHONY: lint
+lint: $(godeps)
 	golangci-lint run
 
+.PHONY: test
 test: $(godeps)
-	@go test -cover ./...
+	go test -cover ./...
 
 $(binary): $(godeps)
-	make -C cmd/
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -buildvcs=false -o $(binary)
 
+.PHONY: clean
 clean:
-	make -C cmd/ clean
+	rm -f $(binary)

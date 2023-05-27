@@ -1,6 +1,4 @@
-// Package nitriding implements a lightweight framework to build networked
-// Go applications that run in AWS Nitro Enclaves.
-package nitriding
+package main
 
 import (
 	"context"
@@ -15,13 +13,11 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"net/http"
 	"net/http/httputil"
 	_ "net/http/pprof"
 	"net/url"
-	"os"
 	"sync"
 	"time"
 
@@ -30,7 +26,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/brave/nitriding-daemon/randseed"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -58,8 +53,6 @@ const (
 )
 
 var (
-	elog              = log.New(os.Stderr, "nitriding: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
-	inEnclave         = false
 	errNoKeyMaterial  = errors.New("no key material registered")
 	errCfgMissingFQDN = errors.New("given config is missing FQDN")
 	errCfgMissingPort = errors.New("given config is missing port")
@@ -179,19 +172,6 @@ func (c *Config) String() string {
 	return string(s)
 }
 
-// init is called once, at package initialization time.
-func init() {
-	var err error
-
-	// Determine if we're inside an enclave.  Abort execution in the unexpected
-	// case that we cannot tell.
-	inEnclave, err = randseed.InEnclave()
-	if err != nil {
-		elog.Fatalf("Failed to determine if we're inside an enclave: %v", err)
-	}
-	elog.Printf("We're running inside an enclave: %v", inEnclave)
-}
-
 // NewEnclave creates and returns a new enclave with the given config.
 func NewEnclave(cfg *Config) (*Enclave, error) {
 	if err := cfg.Validate(); err != nil {
@@ -279,8 +259,8 @@ func (e *Enclave) Start() error {
 	var err error
 	errPrefix := "failed to start Nitro Enclave"
 
-	// Set file descriptor limit.  There's no need to exit if this fails.
 	if inEnclave {
+		// Set file descriptor limit.  There's no need to exit if this fails.
 		if err = setFdLimit(e.cfg.FdCur, e.cfg.FdMax); err != nil {
 			elog.Printf("Failed to set new file descriptor limit: %s", err)
 		}

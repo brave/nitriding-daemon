@@ -1,4 +1,4 @@
-package nitriding
+package main
 
 import (
 	"testing"

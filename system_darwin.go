@@ -1,4 +1,4 @@
-package nitriding
+package main
 
 import "github.com/songgao/water"
 
@@ -9,3 +9,4 @@ var ourWaterParams = water.PlatformSpecificParams{Name: ifaceTap}
 func configureLoIface() error  { return nil }
 func configureTapIface() error { return nil }
 func writeResolvconf() error   { return nil }
+func maybeSeedEntropy()        {}

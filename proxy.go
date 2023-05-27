@@ -1,4 +1,4 @@
-package nitriding
+package main
 
 // Code mostly taken from:
 // https://github.com/containers/gvisor-tap-vsock/blob/main/cmd/vm/main_linux.go

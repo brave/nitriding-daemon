@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"io"
 	"log"
@@ -10,11 +11,26 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	"github.com/brave/nitriding-daemon"
 )
 
-var l = log.New(os.Stderr, "nitriding-cmd: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
+var (
+	elog      = log.New(os.Stderr, "nitriding: ", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile)
+	inEnclave = false
+)
+
+func init() {
+	// Determine if we're running inside an enclave.
+	if _, err := os.Stat("/dev/nsm"); err == nil {
+		inEnclave = true
+	} else if errors.Is(err, os.ErrNotExist) {
+		inEnclave = false
+	} else {
+		// We encountered an unknown error.  Let's assume that we are not
+		// inside an enclave.
+		inEnclave = false
+	}
+	maybeSeedEntropy()
+}
 
 func main() {
 	var fqdn, appURL, appWebSrv, appCmd string
@@ -49,22 +65,22 @@ func main() {
 	flag.Parse()
 
 	if fqdn == "" {
-		l.Fatalf("-fqdn must be set.")
+		elog.Fatalf("-fqdn must be set.")
 	}
 	if extPort < 1 || extPort > math.MaxUint16 {
-		l.Fatalf("-extport must be in interval [1, %d]", math.MaxUint16)
+		elog.Fatalf("-extport must be in interval [1, %d]", math.MaxUint16)
 	}
 	if intPort < 1 || intPort > math.MaxUint16 {
-		l.Fatalf("-intport must be in interval [1, %d]", math.MaxUint16)
+		elog.Fatalf("-intport must be in interval [1, %d]", math.MaxUint16)
 	}
 	if hostProxyPort < 1 || hostProxyPort > math.MaxUint32 {
-		l.Fatalf("-host-proxy-port must be in interval [1, %d]", math.MaxUint32)
+		elog.Fatalf("-host-proxy-port must be in interval [1, %d]", math.MaxUint32)
 	}
 	if prometheusPort > math.MaxUint16 {
-		l.Fatalf("-prometheus-port must be in interval [1, %d]", math.MaxUint16)
+		elog.Fatalf("-prometheus-port must be in interval [1, %d]", math.MaxUint16)
 	}
 
-	c := &nitriding.Config{
+	c := &Config{
 		FQDN:           fqdn,
 		ExtPort:        uint16(extPort),
 		IntPort:        uint16(intPort),
@@ -78,25 +94,25 @@ func main() {
 	if appURL != "" {
 		u, err := url.Parse(appURL)
 		if err != nil {
-			l.Fatalf("Failed to parse application URL: %v", err)
+			elog.Fatalf("Failed to parse application URL: %v", err)
 		}
 		c.AppURL = u
 	}
 	if appWebSrv != "" {
 		u, err := url.Parse(appWebSrv)
 		if err != nil {
-			l.Fatalf("Failed to parse URL of Web server: %v", err)
+			elog.Fatalf("Failed to parse URL of Web server: %v", err)
 		}
 		c.AppWebSrv = u
 	}
 
-	enclave, err := nitriding.NewEnclave(c)
+	enclave, err := NewEnclave(c)
 	if err != nil {
-		l.Fatalf("Failed to create enclave: %v", err)
+		elog.Fatalf("Failed to create enclave: %v", err)
 	}
 
 	if err := enclave.Start(); err != nil {
-		l.Fatalf("Enclave terminated: %v", err)
+		elog.Fatalf("Enclave terminated: %v", err)
 	}
 
 	// Nitriding supports two ways of starting the enclave application:
@@ -108,46 +124,46 @@ func main() {
 	//    starts nitriding).  In this case, we simply block forever.
 	if appCmd != "" {
 		f := func(s string) {
-			l.Printf("Application says: %s", s)
+			elog.Printf("Application says: %s", s)
 		}
 		runAppCommand(appCmd, f, f)
 	} else {
 		// Block forever.
 		<-make(chan struct{})
 	}
-	l.Println("Exiting nitriding.")
+	elog.Println("Exiting nitriding.")
 }
 
 // runAppCommand (i) runs the given command, (ii) waits until the command
 // finished execution, and (iii) in the meanwhile prints the command's stdout
 // and stderr.
 func runAppCommand(appCmd string, stdoutFunc, stderrFunc func(string)) {
-	l.Printf("Invoking the enclave application.")
+	elog.Printf("Invoking the enclave application.")
 	args := strings.Split(appCmd, " ")
 	cmd := exec.Command(args[0], args[1:]...)
 
 	// Print the enclave application's stderr.
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		l.Fatalf("Failed to obtain stderr pipe for enclave application: %v", err)
+		elog.Fatalf("Failed to obtain stderr pipe for enclave application: %v", err)
 	}
 	go forwardOutput(stderr, stderrFunc, "stderr")
 
 	// Print the enclave application's stdout.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		l.Fatalf("Failed to obtain stdout pipe for enclave application: %v", err)
+		elog.Fatalf("Failed to obtain stdout pipe for enclave application: %v", err)
 	}
 	go forwardOutput(stdout, stdoutFunc, "stdout")
 
 	if err := cmd.Start(); err != nil {
-		l.Fatalf("Failed to start enclave application: %v", err)
+		elog.Fatalf("Failed to start enclave application: %v", err)
 	}
 
 	if err := cmd.Wait(); err != nil {
-		l.Fatalf("Enclave application exited with non-0 exit code: %v", err)
+		elog.Fatalf("Enclave application exited with non-0 exit code: %v", err)
 	}
-	l.Println("Enclave application exited.")
+	elog.Println("Enclave application exited.")
 }
 
 // forwardOutput continuously reads from the given Reader until an EOF occurs.
@@ -158,6 +174,6 @@ func forwardOutput(readCloser io.ReadCloser, f func(string), output string) {
 		f(scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
-		l.Printf("Error reading from enclave application's %s: %v", output, err)
+		elog.Printf("Error reading from enclave application's %s: %v", output, err)
 	}
 }
