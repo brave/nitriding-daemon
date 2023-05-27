@@ -283,7 +283,7 @@ func (e *Enclave) Start() error {
 		return fmt.Errorf("%s: failed to create certificate: %w", errPrefix, err)
 	}
 
-	if err = startWebServers(e); err != nil {
+	if err = e.startWebServers(); err != nil {
 		return fmt.Errorf("%s: %w", errPrefix, err)
 	}
 
@@ -307,7 +307,7 @@ func (e *Enclave) Stop() error {
 
 // startWebServers starts our public-facing Web server, our enclave-internal
 // Web server, and -- if desired -- a Web server for profiling and/or metrics.
-func startWebServers(e *Enclave) error {
+func (e *Enclave) startWebServers() error {
 	if e.cfg.PrometheusPort > 0 {
 		elog.Printf("Starting Prometheus Web server (%s).", e.promSrv.Addr)
 		go func() {
