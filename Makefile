@@ -26,4 +26,5 @@ $(binary): $(godeps)
 
 .PHONY: clean
 clean:
-	rm -f $(binary) $(cover_out) $(cover_html)
+	rm -f $(binary)
+	rm -f $(cover_out) $(cover_html)
