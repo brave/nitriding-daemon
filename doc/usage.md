@@ -7,7 +7,7 @@ nitriding.  The following steps are necessary.
    builds](https://reproducible-builds.org); otherwise, users won't be able to
    verify your enclave image.  Both Rust and Go support reproducible builds
    although some effort may be necessary to get there.
-   [Nitriding's Makefile](../cmd/Makefile) shows how one can build a Go program
+   [Nitriding's Makefile](../Makefile) shows how one can build a Go program
    reproducibly.
 
 2. Set up
@@ -29,8 +29,8 @@ nitriding.  The following steps are necessary.
    application expose any other ports?  If so, you have to forward these ports
    too.
 
-3. Build the nitriding executable by running `make cmd/nitriding`.
-   (Then, run `./cmd/nitriding -help` to see a list of command line options.)
+3. Build the nitriding executable by running `make nitriding`.
+   (Then, run `./nitriding -help` to see a list of command line options.)
    For reproducible Docker images, we recommend
    [kaniko](https://github.com/GoogleContainerTools/kaniko)
    or
@@ -64,6 +64,6 @@ nitriding.  The following steps are necessary.
 
 Finally, take a look at
 [this example application](/example)
-or 
+or
 [this production application](https://github.com/brave/star-randsrv/)
 to learn how one can build on top of nitriding.
