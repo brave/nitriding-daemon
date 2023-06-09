@@ -208,8 +208,9 @@ func TestHashHandler(t *testing.T) {
 	)
 
 	// Send too much data.
+	s := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 	assertResponse(t,
-		makeReq(http.MethodPost, pathHash, bytes.NewBufferString("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")),
+		makeReq(http.MethodPost, pathHash, bytes.NewBufferString(s)),
 		newResp(http.StatusBadRequest, errTooMuchToRead.Error()),
 	)
 
