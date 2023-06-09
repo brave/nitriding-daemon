@@ -37,6 +37,7 @@ func newResp(status int, body string) *http.Response {
 
 // assertResponse ensures that the two given HTTP responses are (almost)
 // identical.  We only check the HTTP status code and the response body.
+// If the expected response has no body, we only compare the status code.
 func assertResponse(t *testing.T, actual, expected *http.Response) {
 	t.Helper()
 
