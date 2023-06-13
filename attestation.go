@@ -3,13 +3,8 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/http"
-	"regexp"
-	"strings"
 
 	"github.com/hf/nitrite"
 	"github.com/hf/nsm"
@@ -25,13 +20,11 @@ const (
 )
 
 var (
-	errMethodNotGET      = "only HTTP GET requests are allowed"
 	errBadForm           = "failed to parse POST form data"
 	errNoNonce           = "could not find nonce in URL query parameters"
 	errBadNonceFormat    = fmt.Sprintf("unexpected nonce format; must be %d-digit hex string", nonceNumDigits)
 	errFailedAttestation = "failed to obtain attestation document from hypervisor"
 	errProfilingSet      = "attestation disabled because profiling is enabled"
-	nonceRegExp          = fmt.Sprintf("[a-f0-9]{%d}", nonceNumDigits)
 
 	// getPCRValues is a variable pointing to a function that returns PCR
 	// values.  Using a variable allows us to easily mock the function in our
@@ -57,55 +50,6 @@ func (a *AttestationHashes) Serialize() []byte {
 		hashPrefix,
 		a.appKeyHash)
 	return []byte(str)
-}
-
-// attestationHandler takes as input a flag indicating if profiling is enabled
-// and an AttestationHashes struct, and returns a HandlerFunc.  If profiling is
-// enabled, we abort attestation because profiling leaks enclave-internal data.
-// The returned HandlerFunc expects a nonce in the URL query parameters and
-// subsequently asks its hypervisor for an attestation document that contains
-// both the nonce and the hashes in the given struct.  The resulting
-// Base64-encoded attestation document is then returned to the requester.
-func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, errMethodNotGET, http.StatusMethodNotAllowed)
-			return
-		}
-		if useProfiling {
-			http.Error(w, errProfilingSet, http.StatusServiceUnavailable)
-			return
-		}
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, errBadForm, http.StatusBadRequest)
-			return
-		}
-
-		nonce := r.URL.Query().Get("nonce")
-		if nonce == "" {
-			http.Error(w, errNoNonce, http.StatusBadRequest)
-			return
-		}
-		nonce = strings.ToLower(nonce)
-		if valid, _ := regexp.MatchString(nonceRegExp, nonce); !valid {
-			http.Error(w, errBadNonceFormat, http.StatusBadRequest)
-			return
-		}
-		// Decode hex-encoded nonce.
-		rawNonce, err := hex.DecodeString(nonce)
-		if err != nil {
-			http.Error(w, errBadNonceFormat, http.StatusBadRequest)
-			return
-		}
-
-		rawDoc, err := attest(rawNonce, hashes.Serialize(), nil)
-		if err != nil {
-			http.Error(w, errFailedAttestation, http.StatusInternalServerError)
-			return
-		}
-		b64Doc := base64.StdEncoding.EncodeToString(rawDoc)
-		fmt.Fprintln(w, b64Doc)
-	}
 }
 
 // _getPCRValues returns the enclave's platform configuration register (PCR)

@@ -17,14 +17,75 @@ import (
 	"time"
 )
 
+// makeRequestFor is a helper function that creates an HTTP request.
+func makeRequestFor(srv *http.Server) func(method, path string, body io.Reader) *http.Response {
+	return func(method, path string, body io.Reader) *http.Response {
+		req := httptest.NewRequest(method, path, body)
+		rec := httptest.NewRecorder()
+		srv.Handler.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+}
+
+// newResp is a helper function that creates an HTTP response.
+func newResp(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
+	}
+}
+
+// assertResponse ensures that the two given HTTP responses are (almost)
+// identical.  We only check the HTTP status code and the response body.
+// If the expected response has no body, we only compare the status code.
+func assertResponse(t *testing.T, actual, expected *http.Response) {
+	t.Helper()
+
+	if actual.StatusCode != expected.StatusCode {
+		t.Fatalf("expected status code %d but got %d", expected.StatusCode, actual.StatusCode)
+	}
+
+	expectedBody, err := io.ReadAll(expected.Body)
+	if err != nil {
+		t.Fatalf("failed to read expected response body: %v", err)
+	}
+	actualBody, err := io.ReadAll(actual.Body)
+	if err != nil {
+		t.Fatalf("failed to read actual response body: %v", err)
+	}
+
+	if len(expectedBody) == 0 {
+		return
+	}
+	// Remove the last byte of the actual body if it's a newline.
+	if len(actualBody) > 0 && actualBody[len(actualBody)-1] == '\n' {
+		actualBody = actualBody[:len(actualBody)-1]
+	}
+	if !bytes.Equal(expectedBody, actualBody) {
+		t.Fatalf("expected HTTP body\n%q\nbut got\n%q", string(expectedBody), string(actualBody))
+	}
+}
+
+func TestRootHandler(t *testing.T) {
+	makeReq := makeRequestFor(createEnclave(&defaultCfg).pubSrv)
+
+	assertResponse(t,
+		makeReq(http.MethodGet, pathRoot, nil),
+		newResp(http.StatusOK, formatIndexPage(defaultCfg.AppURL)),
+	)
+}
+
 // signalReady signals to the enclave-internal Web server that we're ready,
 // instructing it to spin up its Internet-facing Web server.
 func signalReady(t *testing.T, e *Enclave) {
 	t.Helper()
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, pathReady, nil)
-	e.privSrv.Handler.ServeHTTP(rec, req)
-	expect(t, rec.Result(), http.StatusOK, "")
+	makeReq := makeRequestFor(e.privSrv)
+
+	assertResponse(t,
+		makeReq(http.MethodGet, pathReady, nil),
+		newResp(http.StatusOK, ""),
+	)
+
 	// There's no straightforward way to register a callback for when a Web
 	// server has started because ListenAndServeTLS blocks for as long as the
 	// server is alive.  Let's wait briefly to give the Web server enough time
@@ -33,59 +94,53 @@ func signalReady(t *testing.T, e *Enclave) {
 }
 
 func TestSyncHandler(t *testing.T) {
-	e := createEnclave(&defaultCfg)
-	h := reqSyncHandler(e)
-	rec := httptest.NewRecorder()
+	makeReq := makeRequestFor(createEnclave(&defaultCfg).privSrv)
 
-	req, err := http.NewRequest(http.MethodGet, pathSync, nil)
-	if err != nil {
-		t.Fatalf("Failed to create HTTP request: %v", err)
-	}
-	h(rec, req)
+	assertResponse(t,
+		makeReq(http.MethodGet, pathSync, nil),
+		newResp(http.StatusBadRequest, errNoAddr.Error()),
+	)
 
-	expect(t, rec.Result(), http.StatusBadRequest, errNoAddr.Error())
+	assertResponse(t,
+		makeReq(http.MethodGet, pathSync+"?addr=:foo", nil),
+		newResp(http.StatusBadRequest, errBadSyncAddr.Error()),
+	)
+
+	assertResponse(t,
+		makeReq(http.MethodGet, pathSync+"?addr=foobar", nil),
+		newResp(http.StatusInternalServerError, ""), // The exact error is convoluted, so we skip comparison.
+	)
 }
 
 func TestStateHandlers(t *testing.T) {
-	expected := []byte{1, 2, 3, 4, 5} // The key material that we're setting and retrieving.
-	e := createEnclave(&defaultCfg)
-	setHandler := putStateHandler(e)
-	getHandler := getStateHandler(e)
-	rec := httptest.NewRecorder()
-	req, err := http.NewRequest(http.MethodPut, pathState, bytes.NewReader(expected))
-	if err != nil {
-		t.Fatalf("Failed to create HTTP request: %v", err)
-	}
+	makeReq := makeRequestFor(createEnclave(&defaultCfg).privSrv)
 
-	setHandler(rec, req)
-	resp := rec.Result()
+	tooLargeKey := make([]byte, 1024*1024+1)
+	assertResponse(t,
+		makeReq(http.MethodPut, pathState, bytes.NewReader(tooLargeKey)),
+		newResp(http.StatusInternalServerError, errFailedReqBody.Error()),
+	)
 
 	// As long as we don't hit our (generous) upload limit, we always expect an
 	// HTTP 200 response.
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Expected HTTP status code %d but got %d.", http.StatusOK, resp.StatusCode)
-	}
+	almostTooLargeKey := make([]byte, 1024*1024)
+	assertResponse(t,
+		makeReq(http.MethodPut, pathState, bytes.NewReader(almostTooLargeKey)),
+		newResp(http.StatusOK, ""),
+	)
+
+	// Subsequent calls to the endpoint overwrite the previous call.
+	expected := []byte("foobar")
+	assertResponse(t,
+		makeReq(http.MethodPut, pathState, bytes.NewReader(expected)),
+		newResp(http.StatusOK, ""),
+	)
 
 	// Now retrieve the state and make sure that it's what we sent earlier.
-	req, err = http.NewRequest(http.MethodGet, pathState, nil)
-	if err != nil {
-		t.Fatalf("Failed to create HTTP request: %v", err)
-	}
-	rec = httptest.NewRecorder()
-	getHandler(rec, req)
-	resp = rec.Result()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Expected HTTP status code %d but got %d.", http.StatusOK, resp.StatusCode)
-	}
-
-	retrieved, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("Failed to read HTTP response body: %v", err)
-	}
-	if !bytes.Equal(expected, retrieved) {
-		t.Fatalf("Expected state %q but got %q.", expected, retrieved)
-	}
+	assertResponse(t,
+		makeReq(http.MethodGet, pathState, nil),
+		newResp(http.StatusOK, string(expected)),
+	)
 }
 
 func TestProxyHandler(t *testing.T) {
@@ -93,7 +148,7 @@ func TestProxyHandler(t *testing.T) {
 
 	// Nitring acts as a reverse proxy to this Web server.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, appPage)
+		fmt.Fprintln(w, appPage)
 	}))
 	defer srv.Close()
 	u, err := url.Parse(srv.URL)
@@ -124,7 +179,7 @@ func TestProxyHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expect(t, resp, http.StatusOK, indexPage)
+	assertResponse(t, resp, newResp(http.StatusOK, indexPage))
 
 	// Request a random page.  Nitriding is going to forwrad the request to our
 	// test Web server.
@@ -132,44 +187,45 @@ func TestProxyHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expect(t, resp, http.StatusOK, appPage)
+	assertResponse(t, resp, newResp(http.StatusOK, appPage))
 }
 
 func TestHashHandler(t *testing.T) {
-	e := createEnclave(&defaultCfg)
-	h := hashHandler(e)
 	validHash := [sha256.Size]byte{}
 	validHashB64 := base64.StdEncoding.EncodeToString(validHash[:])
+	e := createEnclave(&defaultCfg)
+	makeReq := makeRequestFor(e.privSrv)
 
 	// Send invalid Base64.
-	req, _ := http.NewRequest(http.MethodPost, pathHash, bytes.NewBufferString("foo"))
-	rec := httptest.NewRecorder()
-	h(rec, req)
-	expect(t, rec.Result(), http.StatusBadRequest, errNoBase64.Error())
+	assertResponse(t,
+		makeReq(http.MethodPost, pathHash, bytes.NewBufferString("foo")),
+		newResp(http.StatusBadRequest, errNoBase64.Error()),
+	)
 
 	// Send invalid hash size.
-	req.Body = io.NopCloser(bytes.NewBufferString("AAAAAAAAAAAAAA=="))
-	rec = httptest.NewRecorder()
-	h(rec, req)
-	expect(t, rec.Result(), http.StatusBadRequest, errHashWrongSize.Error())
+	assertResponse(t,
+		makeReq(http.MethodPost, pathHash, bytes.NewBufferString("AAAAAAAAAAAAAA==")),
+		newResp(http.StatusBadRequest, errHashWrongSize.Error()),
+	)
 
 	// Send too much data.
-	req.Body = io.NopCloser(bytes.NewBufferString("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="))
-	rec = httptest.NewRecorder()
-	h(rec, req)
-	expect(t, rec.Result(), http.StatusBadRequest, errTooMuchToRead.Error())
+	s := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	assertResponse(t,
+		makeReq(http.MethodPost, pathHash, bytes.NewBufferString(s)),
+		newResp(http.StatusBadRequest, errTooMuchToRead.Error()),
+	)
 
 	// Finally, send a valid, Base64-encoded SHA-256 hash.
-	req.Body = io.NopCloser(bytes.NewBufferString(validHashB64))
-	rec = httptest.NewRecorder()
-	h(rec, req)
-	expect(t, rec.Result(), http.StatusOK, "")
+	assertResponse(t,
+		makeReq(http.MethodPost, pathHash, bytes.NewBufferString(validHashB64)),
+		newResp(http.StatusOK, ""),
+	)
 
 	// Same as above but with an additional \n.
-	req.Body = io.NopCloser(bytes.NewBufferString(validHashB64 + "\n"))
-	rec = httptest.NewRecorder()
-	h(rec, req)
-	expect(t, rec.Result(), http.StatusOK, "")
+	assertResponse(t,
+		makeReq(http.MethodPost, pathHash, bytes.NewBufferString(validHashB64+"\n")),
+		newResp(http.StatusOK, ""),
+	)
 
 	// Make sure that our hash was set correctly.
 	if e.hashes.appKeyHash != validHash {
@@ -243,21 +299,48 @@ func TestReadyHandler(t *testing.T) {
 func TestAttestationHandlerWhileProfiling(t *testing.T) {
 	cfg := defaultCfg
 	cfg.UseProfiling = true
-	e := createEnclave(&cfg)
+	makeReq := makeRequestFor(createEnclave(&cfg).pubSrv)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, pathAttestation, nil)
-	e.pubSrv.Handler.ServeHTTP(rec, req)
 	// Ensure that the attestation handler aborts if profiling is enabled.
-	expect(t, rec.Result(), http.StatusServiceUnavailable, errProfilingSet)
+	assertResponse(t,
+		makeReq(http.MethodGet, pathAttestation, nil),
+		newResp(http.StatusServiceUnavailable, errProfilingSet),
+	)
+}
+
+func TestAttestationHandler(t *testing.T) {
+	makeReq := makeRequestFor(createEnclave(&defaultCfg).pubSrv)
+
+	assertResponse(t,
+		makeReq(http.MethodPost, pathAttestation, nil),
+		newResp(http.StatusMethodNotAllowed, ""),
+	)
+
+	assertResponse(t,
+		makeReq(http.MethodGet, pathAttestation, nil),
+		newResp(http.StatusBadRequest, errNoNonce),
+	)
+
+	assertResponse(t,
+		makeReq(http.MethodGet, pathAttestation+"?nonce=foobar", nil),
+		newResp(http.StatusBadRequest, errBadNonceFormat),
+	)
+
+	// If we are not inside an enclave, attestation is going to result in an
+	// error.
+	if !inEnclave {
+		assertResponse(t,
+			makeReq(http.MethodGet, pathAttestation+"?nonce=0000000000000000000000000000000000000000", nil),
+			newResp(http.StatusInternalServerError, errFailedAttestation),
+		)
+	}
 }
 
 func TestConfigHandler(t *testing.T) {
-	e := createEnclave(&defaultCfg)
-	expected := defaultCfg.String()
+	makeReq := makeRequestFor(createEnclave(&defaultCfg).pubSrv)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, pathConfig, nil)
-	e.pubSrv.Handler.ServeHTTP(rec, req)
-	expect(t, rec.Result(), http.StatusOK, expected)
+	assertResponse(t,
+		makeReq(http.MethodGet, pathConfig, nil),
+		newResp(http.StatusOK, defaultCfg.String()),
+	)
 }

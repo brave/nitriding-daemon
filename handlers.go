@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ var (
 	errFailedReqBody  = errors.New("failed to read request body")
 	errFailedGetState = errors.New("failed to retrieve saved state")
 	errNoAddr         = errors.New("parameter 'addr' not found")
+	errBadSyncAddr    = errors.New("invalid 'addr' parameter for sync")
 	errHashWrongSize  = errors.New("given hash is of invalid size")
 )
 
@@ -66,7 +68,7 @@ func reqSyncHandler(e *Enclave) http.HandlerFunc {
 
 		// Are we dealing with a well-formed URL?
 		if _, err := url.Parse(addr); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, errBadSyncAddr.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -180,5 +182,46 @@ func readyHandler(e *Enclave) http.HandlerFunc {
 func configHandler(cfg *Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, cfg)
+	}
+}
+
+// attestationHandler takes as input a flag indicating if profiling is enabled
+// and an AttestationHashes struct, and returns a HandlerFunc.  If profiling is
+// enabled, we abort attestation because profiling leaks enclave-internal data.
+// The returned HandlerFunc expects a nonce in the URL query parameters and
+// subsequently asks its hypervisor for an attestation document that contains
+// both the nonce and the hashes in the given struct.  The resulting
+// Base64-encoded attestation document is then returned to the requester.
+func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if useProfiling {
+			http.Error(w, errProfilingSet, http.StatusServiceUnavailable)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, errBadForm, http.StatusBadRequest)
+			return
+		}
+
+		nonce := r.URL.Query().Get("nonce")
+		if nonce == "" {
+			http.Error(w, errNoNonce, http.StatusBadRequest)
+			return
+		}
+		nonce = strings.ToLower(nonce)
+		// Decode hex-encoded nonce.
+		rawNonce, err := hex.DecodeString(nonce)
+		if err != nil {
+			http.Error(w, errBadNonceFormat, http.StatusBadRequest)
+			return
+		}
+
+		rawDoc, err := attest(rawNonce, hashes.Serialize(), nil)
+		if err != nil {
+			http.Error(w, errFailedAttestation, http.StatusInternalServerError)
+			return
+		}
+		b64Doc := base64.StdEncoding.EncodeToString(rawDoc)
+		fmt.Fprintln(w, b64Doc)
 	}
 }

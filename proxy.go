@@ -121,7 +121,7 @@ func linkUp() error {
 	return netlink.LinkSetUp(link)
 }
 
-func rx(conn net.Conn, tap *water.Interface, errCh chan error) {
+func rx(conn io.Writer, tap io.Reader, errCh chan error) {
 	elog.Println("Waiting for frames from enclave application.")
 	buf := make([]byte, frameSizeLen+frameLen) // Two bytes for the frame length plus the frame itself
 
@@ -146,7 +146,7 @@ func rx(conn net.Conn, tap *water.Interface, errCh chan error) {
 	}
 }
 
-func tx(conn net.Conn, tap *water.Interface, errCh chan error) {
+func tx(conn io.Reader, tap io.Writer, errCh chan error) {
 	elog.Println("Waiting for frames from host.")
 	buf := make([]byte, frameSizeLen+frameLen) // Two bytes for the frame length plus the frame itself
 
