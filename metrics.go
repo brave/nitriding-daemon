@@ -48,7 +48,9 @@ func newMetrics(reg prometheus.Registerer, namespace string) *metrics {
 	reg.MustRegister(m.proxiedReqs)
 	reg.MustRegister(m.reqs)
 
-	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+		Namespace: namespace,
+	}))
 	reg.MustRegister(collectors.NewGoCollector())
 
 	return m
