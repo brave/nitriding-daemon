@@ -102,6 +102,10 @@ type Config struct {
 	// information and are safe to export in production.
 	PrometheusPort uint16
 
+	// PrometheusNamespace specifies the namespace for exported Prometheus
+	// metrics.  Consider setting this to your application's name.
+	PrometheusNamespace string
+
 	// UseProfiling enables profiling via pprof.  Profiling information will be
 	// available at /enclave/debug.  Note that profiling data is privacy
 	// sensitive and therefore must not be enabled in production.
@@ -194,7 +198,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 			Handler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}),
 		},
 		promRegistry: reg,
-		metrics:      newMetrics(reg),
+		metrics:      newMetrics(reg, cfg.PrometheusNamespace),
 		nonceCache:   newCache(defaultItemExpiry),
 		hashes:       new(AttestationHashes),
 		stop:         make(chan bool),

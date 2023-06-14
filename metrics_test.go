@@ -71,7 +71,7 @@ func TestMetrics(t *testing.T) {
 	expectedPath := "/foo"
 	expectedMethod := http.MethodGet
 	reg := prometheus.NewRegistry()
-	m := newMetrics(reg)
+	m := newMetrics(reg, "nitriding")
 	req, err := http.NewRequest(expectedMethod, expectedPath, nil)
 	if err != nil {
 		t.Fatalf("Failed to create new HTTP request: %v", err)
