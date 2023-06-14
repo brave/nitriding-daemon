@@ -33,7 +33,7 @@ func init() {
 }
 
 func main() {
-	var fqdn, appURL, appWebSrv, appCmd string
+	var fqdn, appURL, appWebSrv, appCmd, prometheusNamespace string
 	var extPort, intPort, hostProxyPort, prometheusPort uint
 	var useACME, waitForApp, useProfiling, debug bool
 	var err error
@@ -46,6 +46,8 @@ func main() {
 		"Enclave-internal HTTP server of the enclave application (e.g., \"http://127.0.0.1:8081\").")
 	flag.StringVar(&appCmd, "appcmd", "",
 		"Launch enclave application via the given command.")
+	flag.StringVar(&prometheusNamespace, "prometheus-namespace", "",
+		"Prometheus namespace for exported metrics.")
 	flag.UintVar(&extPort, "extport", 443,
 		"Nitriding's VSOCK-facing HTTPS port.  Must match port forwarding rules on EC2 host.")
 	flag.UintVar(&intPort, "intport", 8080,
@@ -79,17 +81,21 @@ func main() {
 	if prometheusPort > math.MaxUint16 {
 		elog.Fatalf("-prometheus-port must be in interval [1, %d]", math.MaxUint16)
 	}
+	if prometheusPort != 0 && prometheusNamespace == "" {
+		elog.Fatalf("-prometheus-namespace must be set when Prometheus is used.")
+	}
 
 	c := &Config{
-		FQDN:           fqdn,
-		ExtPort:        uint16(extPort),
-		IntPort:        uint16(intPort),
-		PrometheusPort: uint16(prometheusPort),
-		HostProxyPort:  uint32(hostProxyPort),
-		UseACME:        useACME,
-		WaitForApp:     waitForApp,
-		UseProfiling:   useProfiling,
-		Debug:          debug,
+		FQDN:                fqdn,
+		ExtPort:             uint16(extPort),
+		IntPort:             uint16(intPort),
+		PrometheusPort:      uint16(prometheusPort),
+		PrometheusNamespace: prometheusNamespace,
+		HostProxyPort:       uint32(hostProxyPort),
+		UseACME:             useACME,
+		WaitForApp:          waitForApp,
+		UseProfiling:        useProfiling,
+		Debug:               debug,
 	}
 	if appURL != "" {
 		u, err := url.Parse(appURL)

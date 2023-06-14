@@ -16,7 +16,6 @@ const (
 	respErr    = "http_resp_error"
 
 	notAvailable = "n/a"
-	namespace    = "nitriding"
 )
 
 // metrics contains our Prometheus metrics.
@@ -26,7 +25,8 @@ type metrics struct {
 }
 
 // newMetrics initializes our Prometheus metrics.
-func newMetrics(reg prometheus.Registerer) *metrics {
+func newMetrics(reg prometheus.Registerer, namespace string) *metrics {
+	elog.Printf("Initializing Prometheus metrics for %q.", namespace)
 	m := &metrics{
 		reqs: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
