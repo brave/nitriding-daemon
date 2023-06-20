@@ -15,8 +15,7 @@ const (
 	nonceLen       = 20           // The size of a nonce in bytes.
 	nonceNumDigits = nonceLen * 2 // The number of hex digits in a nonce.
 	maxAttDocLen   = 5000         // A (reasonable?) upper limit for attestation doc lengths.
-	hashPrefix     = "sha256:"
-	hashSeparator  = ";"
+	hashPrefix     = "\x12\x20"   // SHA-256 multihash prefix
 )
 
 var (
@@ -39,14 +38,13 @@ type AttestationHashes struct {
 	appKeyHash [sha256.Size]byte // Sometimes set, depending on application.
 }
 
-// Serialize returns a byte slice that contains our concatenated hashes.  Note
-// that all hashes are always present.  If a hash was not initialized, it's set
-// to 0-bytes.
+// Serialize returns a byte slice that contains our concatenated hashes.
+// hashPrefix defines the hash type and length.  Note that all hashes are
+// always present.  If a hash was not initialized, it's set to 0-bytes.
 func (a *AttestationHashes) Serialize() []byte {
-	str := fmt.Sprintf("%s%s%s%s%s",
+	str := fmt.Sprintf("%s%s%s%s",
 		hashPrefix,
 		a.tlsKeyHash,
-		hashSeparator,
 		hashPrefix,
 		a.appKeyHash)
 	return []byte(str)
