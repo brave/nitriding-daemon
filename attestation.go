@@ -15,7 +15,6 @@ const (
 	nonceLen       = 20           // The size of a nonce in bytes.
 	nonceNumDigits = nonceLen * 2 // The number of hex digits in a nonce.
 	maxAttDocLen   = 5000         // A (reasonable?) upper limit for attestation doc lengths.
-	hashPrefix     = "\x12\x20"   // SHA-256 multihash prefix
 )
 
 var (
@@ -24,6 +23,9 @@ var (
 	errBadNonceFormat    = fmt.Sprintf("unexpected nonce format; must be %d-digit hex string", nonceNumDigits)
 	errFailedAttestation = "failed to obtain attestation document from hypervisor"
 	errProfilingSet      = "attestation disabled because profiling is enabled"
+
+	// Multihash prefix marks the hash type and digest size
+	hashPrefix = []byte{0x12, sha256.Size}
 
 	// getPCRValues is a variable pointing to a function that returns PCR
 	// values.  Using a variable allows us to easily mock the function in our
@@ -42,12 +44,10 @@ type AttestationHashes struct {
 // hashPrefix defines the hash type and length.  Note that all hashes are
 // always present.  If a hash was not initialized, it's set to 0-bytes.
 func (a *AttestationHashes) Serialize() []byte {
-	str := fmt.Sprintf("%s%s%s%s",
-		hashPrefix,
-		a.tlsKeyHash,
-		hashPrefix,
-		a.appKeyHash)
-	return []byte(str)
+	ser := []byte{}
+	ser = append(ser, append(hashPrefix, a.tlsKeyHash[:]...)...)
+	ser = append(ser, append(hashPrefix, a.appKeyHash[:]...)...)
+	return ser
 }
 
 // _getPCRValues returns the enclave's platform configuration register (PCR)
