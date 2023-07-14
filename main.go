@@ -35,7 +35,7 @@ func init() {
 func main() {
 	var fqdn, appURL, appWebSrv, appCmd, prometheusNamespace string
 	var extPort, intPort, hostProxyPort, prometheusPort uint
-	var useACME, waitForApp, useProfiling, debug bool
+	var useACME, waitForApp, useProfiling, useVsockForExtPort, debug bool
 	var err error
 
 	flag.StringVar(&fqdn, "fqdn", "",
@@ -49,7 +49,9 @@ func main() {
 	flag.StringVar(&prometheusNamespace, "prometheus-namespace", "",
 		"Prometheus namespace for exported metrics.")
 	flag.UintVar(&extPort, "extport", 443,
-		"Nitriding's VSOCK-facing HTTPS port.  Must match port forwarding rules on EC2 host.")
+		"Nitriding's HTTPS port.  Must match port forwarding rules on EC2 host.")
+	flag.BoolVar(&useVsockForExtPort, "vsock-ext", false,
+		"Listen on VSOCK interface for HTTPS port.")
 	flag.UintVar(&intPort, "intport", 8080,
 		"Nitriding's enclave-internal HTTP port.  Only used by the enclave application.")
 	flag.UintVar(&hostProxyPort, "host-proxy-port", 1024,
@@ -88,6 +90,7 @@ func main() {
 	c := &Config{
 		FQDN:                fqdn,
 		ExtPort:             uint16(extPort),
+		UseVsockForExtPort:  useVsockForExtPort,
 		IntPort:             uint16(intPort),
 		PrometheusPort:      uint16(prometheusPort),
 		PrometheusNamespace: prometheusNamespace,

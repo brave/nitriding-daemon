@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	_ "net/http/pprof"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/mdlayher/vsock"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -81,11 +83,16 @@ type Config struct {
 	// is required.
 	FQDN string
 
-	// ExtPort contains the VSOCK-facing TCP port that the Web server should
+	// ExtPort contains the TCP port that the Web server should
 	// listen on, e.g. 443.  This port is not *directly* reachable by the
 	// Internet but the EC2 host's proxy *does* forward Internet traffic to
 	// this port.  This field is required.
 	ExtPort uint16
+
+	// UseVsockForExtPort must be set to true if direct communication
+	// between the host and Web server via VSOCK is desired. The daemon will listen
+	// on the enclave's VSOCK address and the port defined in ExtPort.
+	UseVsockForExtPort bool
 
 	// IntPort contains the enclave-internal TCP port of the Web server that
 	// provides an HTTP API to the enclave application.  This field is
@@ -186,7 +193,6 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	e := &Enclave{
 		cfg: cfg,
 		pubSrv: &http.Server{
-			Addr:    fmt.Sprintf(":%d", cfg.ExtPort),
 			Handler: chi.NewRouter(),
 		},
 		privSrv: &http.Server{
@@ -309,6 +315,16 @@ func (e *Enclave) Stop() error {
 	return nil
 }
 
+// getExtListener returns a listener for the HTTPS service
+// via net or vsock.
+func (e *Enclave) getExtListener() (net.Listener, error) {
+	if e.cfg.UseVsockForExtPort {
+		return vsock.Listen(uint32(e.cfg.ExtPort), nil)
+	} else {
+		return net.Listen("tcp", fmt.Sprintf(":%d", e.cfg.ExtPort))
+	}
+}
+
 // startWebServers starts our public-facing Web server, our enclave-internal
 // Web server, and -- if desired -- a Web server for profiling and/or metrics.
 func (e *Enclave) startWebServers() error {
@@ -336,7 +352,13 @@ func (e *Enclave) startWebServers() error {
 			<-e.ready
 			elog.Println("Application signalled that it's ready.  Starting public Web server.")
 		}
-		err := e.pubSrv.ListenAndServeTLS("", "")
+
+		listener, err := e.getExtListener()
+		if err != nil {
+			elog.Fatalf("Failed to listen on external port: %v", err)
+		}
+
+		err = e.pubSrv.ServeTLS(listener, "", "")
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			elog.Fatalf("Public Web server error: %v", err)
 		}
