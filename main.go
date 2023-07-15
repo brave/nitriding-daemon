@@ -35,7 +35,7 @@ func init() {
 func main() {
 	var fqdn, appURL, appWebSrv, appCmd, prometheusNamespace string
 	var extPort, intPort, hostProxyPort, prometheusPort uint
-	var useACME, waitForApp, useProfiling, useVsockForExtPort, debug bool
+	var useACME, waitForApp, useProfiling, useVsockForExtPort, disableKeepAlives, debug bool
 	var err error
 
 	flag.StringVar(&fqdn, "fqdn", "",
@@ -50,6 +50,8 @@ func main() {
 		"Prometheus namespace for exported metrics.")
 	flag.UintVar(&extPort, "extport", 443,
 		"Nitriding's HTTPS port.  Must match port forwarding rules on EC2 host.")
+	flag.BoolVar(&disableKeepAlives, "disable-keep-alives", false,
+		"Disables keep-alive connections for the HTTPS service.")
 	flag.BoolVar(&useVsockForExtPort, "vsock-ext", false,
 		"Listen on VSOCK interface for HTTPS port.")
 	flag.UintVar(&intPort, "intport", 8080,
@@ -91,6 +93,7 @@ func main() {
 		FQDN:                fqdn,
 		ExtPort:             uint16(extPort),
 		UseVsockForExtPort:  useVsockForExtPort,
+		DisableKeepAlives:   disableKeepAlives,
 		IntPort:             uint16(intPort),
 		PrometheusPort:      uint16(prometheusPort),
 		PrometheusNamespace: prometheusNamespace,

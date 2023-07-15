@@ -94,6 +94,10 @@ type Config struct {
 	// on the enclave's VSOCK address and the port defined in ExtPort.
 	UseVsockForExtPort bool
 
+	// DisableKeepAlives must be set to true if keep-alive connections
+	// should be disabled for the HTTPS service.
+	DisableKeepAlives bool
+
 	// IntPort contains the enclave-internal TCP port of the Web server that
 	// provides an HTTP API to the enclave application.  This field is
 	// required.
@@ -229,6 +233,9 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	if cfg.UseProfiling {
 		e.pubSrv.Handler.(*chi.Mux).Mount(pathProfiling, middleware.Profiler())
 	}
+	if cfg.DisableKeepAlives {
+		e.pubSrv.SetKeepAlivesEnabled(false)
+	}
 
 	// Register public HTTP API.
 	m := e.pubSrv.Handler.(*chi.Mux)
@@ -316,7 +323,7 @@ func (e *Enclave) Stop() error {
 }
 
 // getExtListener returns a listener for the HTTPS service
-// via net or vsock.
+// via AF_INET or AF_VSOCK.
 func (e *Enclave) getExtListener() (net.Listener, error) {
 	if e.cfg.UseVsockForExtPort {
 		return vsock.Listen(uint32(e.cfg.ExtPort), nil)

@@ -4,7 +4,6 @@ go 1.20
 
 require (
 	github.com/containers/gvisor-tap-vsock v0.5.0
-	github.com/go-chi/chi v1.5.4
 	github.com/go-chi/chi/v5 v5.0.8
 	github.com/hf/nitrite v0.0.0-20211104000856-f9e0dcc73703
 	github.com/hf/nsm v0.0.0-20220930140112-cd181bd646b9
@@ -29,6 +28,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/libcontainer v2.2.1+incompatible // indirect
 	github.com/fxamacker/cbor/v2 v2.4.0 // indirect
+	github.com/go-chi/chi v1.5.4 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect
 	github.com/gofrs/flock v0.8.0 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
