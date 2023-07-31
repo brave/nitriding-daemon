@@ -33,7 +33,7 @@ func init() {
 }
 
 func main() {
-	var fqdn, appURL, appWebSrv, appCmd, prometheusNamespace string
+	var fqdn, appURL, appWebSrv, appCmd, prometheusNamespace, mockCertFp string
 	var extPort, intPort, hostProxyPort, prometheusPort uint
 	var useACME, waitForApp, useProfiling, useVsockForExtPort, disableKeepAlives, debug bool
 	var err error
@@ -68,6 +68,8 @@ func main() {
 		"Start Internet-facing Web server only after application signals its readiness.")
 	flag.BoolVar(&debug, "debug", false,
 		"Print debug messages.")
+	flag.StringVar(&mockCertFp, "mock-cert-fp", "",
+		"Mock certificate fingerprint to use in attestation documents (hexadecimal)")
 	flag.Parse()
 
 	if fqdn == "" {
@@ -101,6 +103,7 @@ func main() {
 		UseACME:             useACME,
 		WaitForApp:          waitForApp,
 		UseProfiling:        useProfiling,
+		MockCertFp:          mockCertFp,
 		Debug:               debug,
 	}
 	if appURL != "" {

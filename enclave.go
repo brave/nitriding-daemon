@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -165,6 +166,10 @@ type Config struct {
 	//
 	//     GET http://127.0.0.1:{IntPort}/enclave/ready
 	WaitForApp bool
+
+	// MockCertFp specifies a mock TLS certificate fingerprint
+	// to use in attestation documents.
+	MockCertFp string
 }
 
 // Validate returns an error if required fields in the config are not set.
@@ -493,6 +498,14 @@ func (e *Enclave) setupAcme() error {
 // it in attestation documents, to bind the enclave's certificate to the
 // attestation document.
 func (e *Enclave) setCertFingerprint(rawData []byte) error {
+	if e.cfg.MockCertFp != "" {
+		hash, err := hex.DecodeString(e.cfg.MockCertFp)
+		if err != nil {
+			return errors.New("Failed to decode mock certificate fingerprint hex")
+		}
+		copy(e.hashes.tlsKeyHash[:], hash)
+		return nil
+	}
 	rest := []byte{}
 	for rest != nil {
 		block, rest := pem.Decode(rawData)
