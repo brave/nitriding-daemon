@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestSliceToNonce(t *testing.T) {
 	var err error
@@ -10,4 +13,9 @@ func TestSliceToNonce(t *testing.T) {
 
 	_, err = sliceToNonce(make([]byte, nonceLen))
 	assertEqual(t, err, nil)
+}
+
+func TestWriteToDisk(t *testing.T) {
+	assertEqual(t, writeToDisk([]byte("foo")), nil)
+	defer os.Remove(appPath)
 }

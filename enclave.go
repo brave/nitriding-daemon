@@ -37,16 +37,18 @@ const (
 	// https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-concepts.html
 	parentCID = 3
 	// The following paths are handled by nitriding.
-	pathRoot        = "/enclave"
-	pathAttestation = "/enclave/attestation"
-	pathState       = "/enclave/state"
-	pathSync        = "/enclave/sync"
-	pathHash        = "/enclave/hash"
-	pathReady       = "/enclave/ready"
-	pathProfiling   = "/enclave/debug"
-	pathConfig      = "/enclave/config"
-	pathLeader      = "/enclave/leader"
-	pathHeartbeat   = "/enclave/heartbeat"
+	pathRoot            = "/enclave"
+	pathAttestation     = "/enclave/attestation"
+	pathState           = "/enclave/state"
+	pathSync            = "/enclave/sync"
+	pathHash            = "/enclave/hash"
+	pathReady           = "/enclave/ready"
+	pathProfiling       = "/enclave/debug"
+	pathConfig          = "/enclave/config"
+	pathLeader          = "/enclave/leader"
+	pathHeartbeat       = "/enclave/heartbeat"
+	pathTransparencyLog = "/enclave/log"
+	pathApp             = "/enclave/app"
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
@@ -78,11 +80,14 @@ type Enclave struct {
 	workers               *workerManager
 	keys                  *enclaveKeys
 	httpsCert             *certRetriever
+	loader                *appLoader
 	ready, stop           chan struct{}
 }
 
 // Config represents the configuration of our enclave service.
 type Config struct {
+	Loader bool
+
 	// FQDN contains the fully qualified domain name that's set in the HTTPS
 	// certificate of the enclave's Web server, e.g. "example.com".  This field
 	// is required.
@@ -275,12 +280,16 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	if cfg.isScalingEnabled() {
 		e.setSyncState(inProgress)
 	}
+	if cfg.Loader {
+		e.loader = newAppLoader(e.extPubSrv, newAppRetrieverViaWeb())
+	}
 
 	// Register external public HTTP API.
 	m := e.extPubSrv.Handler.(*chi.Mux)
 	m.Get(pathAttestation, attestationHandler(e.cfg.UseProfiling, e.hashes, e.attester))
 	m.Get(pathRoot, rootHandler(e.cfg))
 	m.Get(pathConfig, configHandler(e.cfg))
+	m.Get(pathTransparencyLog, transparencyLogHandler(e.loader.log))
 
 	// Register external but private HTTP API.
 	m = e.extPrivSrv.Handler.(*chi.Mux)
@@ -347,6 +356,11 @@ func (e *Enclave) Start() error {
 
 	if err = e.startWebServers(); err != nil {
 		return fmt.Errorf("%s: %w", errPrefix, err)
+	}
+
+	// TODO: Does this play well with key synchronization?
+	if e.cfg.Loader {
+		e.loader.start(e.stop)
 	}
 
 	if !e.cfg.isScalingEnabled() {

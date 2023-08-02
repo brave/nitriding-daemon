@@ -16,8 +16,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -256,4 +259,9 @@ func makeLeaderRequest(leader *url.URL, ourNonce nonce, areWeLeader chan bool, e
 		return
 	}
 	errChan <- fmt.Errorf("leader designation endpoint returned %d", resp.StatusCode)
+}
+
+func writeToDisk(appBlob []byte) error {
+	_ = unix.Umask(0)
+	return os.WriteFile(appPath, appBlob, 0755)
 }

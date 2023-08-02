@@ -290,3 +290,11 @@ func getLeaderHandler(ourNonce nonce, weAreLeader chan struct{}) http.HandlerFun
 		w.WriteHeader(http.StatusOK)
 	}
 }
+
+// transparencyLogHandler prints the transparency log of all previously-deployed
+// enclave applications in human-readable form.
+func transparencyLogHandler(log transparencyLog) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, log)
+	}
+}
