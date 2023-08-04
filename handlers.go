@@ -4,15 +4,21 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/go-chi/chi/v5"
 )
 
 const (
+	// The maximum length of a worker registration, which is essentially just a
+	// URL.
+	maxRegistrationLen = 1024
 	// The maximum length of the key material (in bytes) that enclave
 	// applications can PUT to our HTTP API.
 	maxKeyMaterialLen = 1024 * 1024
@@ -121,6 +127,8 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 		}
 		e.SetKeyMaterial(body)
 		w.WriteHeader(http.StatusOK)
+
+		// TODO: The leader must push new keys to the workers.
 	}
 }
 
@@ -226,10 +234,44 @@ func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.Handl
 	}
 }
 
-func leaderHandler(cfg *Config) http.HandlerFunc {
+func leaderHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cfg.IsLeader = true
+		e.cfg.IsLeader = true
 		elog.Println("Designated enclave as leader.")
+
+		e.extPrivSrv.Handler.(*chi.Mux).Put(pathRegistation, workerRegistrationHandler(e.workers, e.keyMaterial))
+		elog.Println("Set up worker registration endpoint.")
+
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func workerRegistrationHandler(ws workers, keyMaterial any) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract the worker's endpoint for the pushing of key material.
+		body, err := io.ReadAll(newLimitReader(r.Body, maxRegistrationLen))
+		if err != nil {
+			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
+			return
+		}
+		// We expect enclaves to PUT a JSON body that contains a "url".
+		registration := struct {
+			URL string `json:"url"`
+		}{}
+		if err = json.Unmarshal(body, &registration); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		u, err := url.Parse(registration.URL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+
+		go func() {
+			ws.registerAndPush(&worker{URL: u}, keyMaterial)
+			elog.Printf("New worker registered; now managing:\n%s", ws.String())
+		}()
 	}
 }

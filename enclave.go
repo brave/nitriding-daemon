@@ -51,6 +51,7 @@ const (
 	pathProfiling   = "/enclave/debug"
 	pathConfig      = "/enclave/config"
 	pathLeader      = "/enclave/leader"
+	pathRegistation = "/enclave/registration"
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
@@ -74,6 +75,7 @@ type Enclave struct {
 	hashes       *AttestationHashes
 	promRegistry *prometheus.Registry
 	metrics      *metrics
+	workers      workers
 	nonceCache   *cache
 	keyMaterial  any
 	ready, stop  chan bool
@@ -238,6 +240,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		metrics:      newMetrics(reg, cfg.PrometheusNamespace),
 		nonceCache:   newCache(defaultItemExpiry),
 		hashes:       new(AttestationHashes),
+		workers:      workers{},
 		stop:         make(chan bool),
 		ready:        make(chan bool),
 	}
@@ -276,7 +279,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 
 	// Register external but private HTTP API.
 	m = e.extPrivSrv.Handler.(*chi.Mux)
-	m.Get(pathLeader, leaderHandler(e.cfg))
+	m.Get(pathLeader, leaderHandler(e))
 
 	// Register enclave-internal HTTP API.
 	m = e.intSrv.Handler.(*chi.Mux)
