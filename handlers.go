@@ -225,3 +225,11 @@ func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.Handl
 		fmt.Fprintln(w, b64Doc)
 	}
 }
+
+func leaderHandler(cfg *Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cfg.IsLeader = true
+		elog.Println("Designated enclave as leader.")
+		w.WriteHeader(http.StatusOK)
+	}
+}

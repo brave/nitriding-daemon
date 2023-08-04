@@ -33,13 +33,15 @@ func init() {
 }
 
 func main() {
-	var fqdn, appURL, appWebSrv, appCmd, prometheusNamespace, mockCertFp string
-	var extPort, intPort, hostProxyPort, prometheusPort uint
+	var fqdn, fqdnLeader, appURL, appWebSrv, appCmd, prometheusNamespace, mockCertFp string
+	var extPubPort, extPrivPort, intPort, hostProxyPort, prometheusPort uint
 	var useACME, waitForApp, useProfiling, useVsockForExtPort, disableKeepAlives, debug bool
 	var err error
 
 	flag.StringVar(&fqdn, "fqdn", "",
 		"FQDN of the enclave application (e.g., \"example.com\").")
+	flag.StringVar(&fqdnLeader, "fqdn-leader", "",
+		"FQDN of the leader enclave (e.g., \"leader.example.com\").")
 	flag.StringVar(&appURL, "appurl", "",
 		"Code repository of the enclave application (e.g., \"github.com/foo/bar\").")
 	flag.StringVar(&appWebSrv, "appwebsrv", "",
@@ -48,8 +50,10 @@ func main() {
 		"Launch enclave application via the given command.")
 	flag.StringVar(&prometheusNamespace, "prometheus-namespace", "",
 		"Prometheus namespace for exported metrics.")
-	flag.UintVar(&extPort, "extport", 443,
-		"Nitriding's HTTPS port.  Must match port forwarding rules on EC2 host.")
+	flag.UintVar(&extPubPort, "ext-pub-port", 443,
+		"Nitriding's external, public HTTPS port.  Must match port forwarding rules on EC2 host.")
+	flag.UintVar(&extPrivPort, "ext-priv-port", 444,
+		"Nitriding's external, non-public HTTPS port.  Must match port forwarding rules on the EC2 host.")
 	flag.BoolVar(&disableKeepAlives, "disable-keep-alives", false,
 		"Disables keep-alive connections for the HTTPS service.")
 	flag.BoolVar(&useVsockForExtPort, "vsock-ext", false,
@@ -75,8 +79,11 @@ func main() {
 	if fqdn == "" {
 		elog.Fatalf("-fqdn must be set.")
 	}
-	if extPort < 1 || extPort > math.MaxUint16 {
+	if extPubPort < 1 || extPubPort > math.MaxUint16 {
 		elog.Fatalf("-extport must be in interval [1, %d]", math.MaxUint16)
+	}
+	if extPrivPort < 1 || extPrivPort > math.MaxUint16 {
+		elog.Fatalf("-extPrivPort must be in interval [1, %d]", math.MaxUint16)
 	}
 	if intPort < 1 || intPort > math.MaxUint16 {
 		elog.Fatalf("-intport must be in interval [1, %d]", math.MaxUint16)
@@ -93,10 +100,11 @@ func main() {
 
 	c := &Config{
 		FQDN:                fqdn,
-		ExtPort:             uint16(extPort),
+		ExtPubPort:          uint16(extPubPort),
+		ExtPrivPort:         uint16(extPrivPort),
+		IntPort:             uint16(intPort),
 		UseVsockForExtPort:  useVsockForExtPort,
 		DisableKeepAlives:   disableKeepAlives,
-		IntPort:             uint16(intPort),
 		PrometheusPort:      uint16(prometheusPort),
 		PrometheusNamespace: prometheusNamespace,
 		HostProxyPort:       uint32(hostProxyPort),

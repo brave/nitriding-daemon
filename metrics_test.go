@@ -50,7 +50,7 @@ func TestHandlerMetrics(t *testing.T) {
 	), float64(1))
 
 	// POST /enclave/hash
-	makeReq = makeRequestFor(enclave.privSrv)
+	makeReq = makeRequestFor(enclave.intSrv)
 	assertResponse(t,
 		makeReq(http.MethodPost, pathHash, bytes.NewBufferString("foo")),
 		newResp(http.StatusBadRequest, errNoBase64.Error()),

@@ -49,7 +49,7 @@ func TestAttestationHashes(t *testing.T) {
 	rec := httptest.NewRecorder()
 	buf := bytes.NewBufferString(base64.StdEncoding.EncodeToString(appKeyHash[:]))
 	req := httptest.NewRequest(http.MethodPost, pathHash, buf)
-	e.privSrv.Handler.ServeHTTP(rec, req)
+	e.intSrv.Handler.ServeHTTP(rec, req)
 
 	s := e.hashes.Serialize()
 	expectedLen := sha256.Size*2 + len(hashPrefix)*2 + len(hashSeparator)

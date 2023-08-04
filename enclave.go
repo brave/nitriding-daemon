@@ -50,6 +50,7 @@ const (
 	pathReady       = "/enclave/ready"
 	pathProfiling   = "/enclave/debug"
 	pathConfig      = "/enclave/config"
+	pathLeader      = "/enclave/leader"
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
@@ -65,8 +66,9 @@ var (
 type Enclave struct {
 	sync.RWMutex
 	cfg          *Config
-	pubSrv       *http.Server
-	privSrv      *http.Server
+	extPubSrv    *http.Server
+	extPrivSrv   *http.Server
+	intSrv       *http.Server
 	promSrv      *http.Server
 	revProxy     *httputil.ReverseProxy
 	hashes       *AttestationHashes
@@ -84,25 +86,41 @@ type Config struct {
 	// is required.
 	FQDN string
 
-	// ExtPort contains the TCP port that the Web server should
+	// FQDNLeader contains the fully qualified domain name of the leader
+	// enclave, which coordinates enclave synchronization.  Only set this field
+	// if horizontal scaling is required.
+	FQDNLeader string
+
+	// IsLeader will be set to true if the enclave is designated as leader for
+	// enclave synchronization.  Leader designation happens at runtime, by
+	// calling an HTTP handler.
+	IsLeader bool
+
+	// ExtPubPort contains the TCP port that the public Web server should
 	// listen on, e.g. 443.  This port is not *directly* reachable by the
 	// Internet but the EC2 host's proxy *does* forward Internet traffic to
 	// this port.  This field is required.
-	ExtPort uint16
+	ExtPubPort uint16
 
-	// UseVsockForExtPort must be set to true if direct communication
-	// between the host and Web server via VSOCK is desired. The daemon will listen
-	// on the enclave's VSOCK address and the port defined in ExtPort.
-	UseVsockForExtPort bool
-
-	// DisableKeepAlives must be set to true if keep-alive connections
-	// should be disabled for the HTTPS service.
-	DisableKeepAlives bool
+	// ExtPrivPort contains the TCP port that the non-public Web server should
+	// listen on.  The Web server behind this port exposes confidential
+	// endpoints and is therefore only meant to be reachable by the enclave
+	// administrator but *not* the public Internet.
+	ExtPrivPort uint16
 
 	// IntPort contains the enclave-internal TCP port of the Web server that
 	// provides an HTTP API to the enclave application.  This field is
 	// required.
 	IntPort uint16
+
+	// UseVsockForExtPort must be set to true if direct communication
+	// between the host and Web server via VSOCK is desired. The daemon will listen
+	// on the enclave's VSOCK address and the port defined in ExtPubPort.
+	UseVsockForExtPort bool
+
+	// DisableKeepAlives must be set to true if keep-alive connections
+	// should be disabled for the HTTPS service.
+	DisableKeepAlives bool
 
 	// HostProxyPort indicates the TCP port of the proxy application running on
 	// the EC2 host.  Note that VSOCK ports are 32 bits large.  This field is
@@ -174,7 +192,7 @@ type Config struct {
 
 // Validate returns an error if required fields in the config are not set.
 func (c *Config) Validate() error {
-	if c.ExtPort == 0 || c.IntPort == 0 || c.HostProxyPort == 0 {
+	if c.ExtPubPort == 0 || c.IntPort == 0 || c.HostProxyPort == 0 {
 		return errCfgMissingPort
 	}
 	if c.FQDN == "" {
@@ -201,10 +219,14 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	reg := prometheus.NewRegistry()
 	e := &Enclave{
 		cfg: cfg,
-		pubSrv: &http.Server{
+		extPubSrv: &http.Server{
 			Handler: chi.NewRouter(),
 		},
-		privSrv: &http.Server{
+		extPrivSrv: &http.Server{
+			Addr:    fmt.Sprintf(":%d", cfg.ExtPrivPort),
+			Handler: chi.NewRouter(),
+		},
+		intSrv: &http.Server{
 			Addr:    fmt.Sprintf("127.0.0.1:%d", cfg.IntPort),
 			Handler: chi.NewRouter(),
 		},
@@ -228,30 +250,36 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	http.DefaultTransport.(*http.Transport).MaxIdleConns = 500
 
 	if cfg.Debug {
-		e.pubSrv.Handler.(*chi.Mux).Use(middleware.Logger)
-		e.privSrv.Handler.(*chi.Mux).Use(middleware.Logger)
+		e.extPubSrv.Handler.(*chi.Mux).Use(middleware.Logger)
+		e.extPrivSrv.Handler.(*chi.Mux).Use(middleware.Logger)
+		e.intSrv.Handler.(*chi.Mux).Use(middleware.Logger)
 	}
 	if cfg.PrometheusPort > 0 {
-		e.pubSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
-		e.privSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
+		e.extPubSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
+		e.extPrivSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
+		e.intSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
 	}
 	if cfg.UseProfiling {
-		e.pubSrv.Handler.(*chi.Mux).Mount(pathProfiling, middleware.Profiler())
+		e.extPubSrv.Handler.(*chi.Mux).Mount(pathProfiling, middleware.Profiler())
 	}
 	if cfg.DisableKeepAlives {
-		e.pubSrv.SetKeepAlivesEnabled(false)
+		e.extPubSrv.SetKeepAlivesEnabled(false)
 	}
 
-	// Register public HTTP API.
-	m := e.pubSrv.Handler.(*chi.Mux)
+	// Register external public HTTP API.
+	m := e.extPubSrv.Handler.(*chi.Mux)
 	m.Get(pathAttestation, attestationHandler(e.cfg.UseProfiling, e.hashes))
 	m.Get(pathNonce, nonceHandler(e))
 	m.Get(pathRoot, rootHandler(e.cfg))
 	m.Post(pathSync, respSyncHandler(e))
 	m.Get(pathConfig, configHandler(e.cfg))
 
+	// Register external but private HTTP API.
+	m = e.extPrivSrv.Handler.(*chi.Mux)
+	m.Get(pathLeader, leaderHandler(e.cfg))
+
 	// Register enclave-internal HTTP API.
-	m = e.privSrv.Handler.(*chi.Mux)
+	m = e.intSrv.Handler.(*chi.Mux)
 	m.Get(pathSync, reqSyncHandler(e))
 	m.Get(pathReady, readyHandler(e))
 	m.Get(pathState, getStateHandler(e))
@@ -263,7 +291,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	if cfg.AppWebSrv != nil {
 		e.revProxy = httputil.NewSingleHostReverseProxy(cfg.AppWebSrv)
 		e.revProxy.BufferPool = newBufPool()
-		e.pubSrv.Handler.(*chi.Mux).Handle(pathProxy, e.revProxy)
+		e.extPubSrv.Handler.(*chi.Mux).Handle(pathProxy, e.revProxy)
 		// If we expose Prometheus metrics, we keep track of the HTTP backend's
 		// responses.
 		if cfg.PrometheusPort > 0 {
@@ -315,10 +343,10 @@ func (e *Enclave) Start() error {
 // Stop stops the enclave.
 func (e *Enclave) Stop() error {
 	close(e.stop)
-	if err := e.privSrv.Shutdown(context.Background()); err != nil {
+	if err := e.intSrv.Shutdown(context.Background()); err != nil {
 		return err
 	}
-	if err := e.pubSrv.Shutdown(context.Background()); err != nil {
+	if err := e.extPubSrv.Shutdown(context.Background()); err != nil {
 		return err
 	}
 	if err := e.promSrv.Shutdown(context.Background()); err != nil {
@@ -331,9 +359,9 @@ func (e *Enclave) Stop() error {
 // via AF_INET or AF_VSOCK.
 func (e *Enclave) getExtListener() (net.Listener, error) {
 	if e.cfg.UseVsockForExtPort {
-		return vsock.Listen(uint32(e.cfg.ExtPort), nil)
+		return vsock.Listen(uint32(e.cfg.ExtPubPort), nil)
 	} else {
-		return net.Listen("tcp", fmt.Sprintf(":%d", e.cfg.ExtPort))
+		return net.Listen("tcp", fmt.Sprintf(":%d", e.cfg.ExtPubPort))
 	}
 }
 
@@ -350,11 +378,18 @@ func (e *Enclave) startWebServers() error {
 		}()
 	}
 
-	elog.Printf("Starting public (%s) and private (%s) Web servers.", e.pubSrv.Addr, e.privSrv.Addr)
 	go func() {
-		err := e.privSrv.ListenAndServe()
+		elog.Printf("Starting internal Web server at %s.", e.intSrv.Addr)
+		err := e.intSrv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			elog.Fatalf("Private Web server error: %v", err)
+		}
+	}()
+	go func() {
+		elog.Printf("Starting external private Web server at %s.", e.extPrivSrv.Addr)
+		err := e.extPrivSrv.ListenAndServeTLS("", "")
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			elog.Fatalf("External private Web server error: %v", err)
 		}
 	}()
 	go func() {
@@ -370,9 +405,10 @@ func (e *Enclave) startWebServers() error {
 			elog.Fatalf("Failed to listen on external port: %v", err)
 		}
 
-		err = e.pubSrv.ServeTLS(listener, "", "")
+		elog.Printf("Starting external public Web server at :%d.", e.cfg.ExtPubPort)
+		err = e.extPubSrv.ServeTLS(listener, "", "")
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			elog.Fatalf("Public Web server error: %v", err)
+			elog.Fatalf("External public Web server error: %v", err)
 		}
 	}()
 
@@ -439,9 +475,10 @@ func (e *Enclave) genSelfSignedCert() error {
 		return err
 	}
 
-	e.pubSrv.TLSConfig = &tls.Config{
+	e.extPubSrv.TLSConfig = &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
+	e.extPrivSrv.TLSConfig = e.extPubSrv.TLSConfig // Both servers share a TLS config.
 
 	return nil
 }
@@ -470,7 +507,7 @@ func (e *Enclave) setupAcme() error {
 		Prompt:     autocert.AcceptTOS,
 		HostPolicy: autocert.HostWhitelist([]string{e.cfg.FQDN}...),
 	}
-	e.pubSrv.TLSConfig = certManager.TLSConfig()
+	e.extPubSrv.TLSConfig = certManager.TLSConfig()
 
 	go func() {
 		var rawData []byte

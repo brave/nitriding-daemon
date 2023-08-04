@@ -79,7 +79,7 @@ func TestRootHandler(t *testing.T) {
 // instructing it to spin up its Internet-facing Web server.
 func signalReady(t *testing.T, e *Enclave) {
 	t.Helper()
-	makeReq := makeRequestFor(e.privSrv)
+	makeReq := makeRequestFor(e.intSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathReady, nil),
@@ -94,7 +94,7 @@ func signalReady(t *testing.T, e *Enclave) {
 }
 
 func TestSyncHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).privSrv)
+	makeReq := makeRequestFor(createEnclave(&defaultCfg).intSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathSync, nil),
@@ -113,7 +113,7 @@ func TestSyncHandler(t *testing.T) {
 }
 
 func TestStateHandlers(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).privSrv)
+	makeReq := makeRequestFor(createEnclave(&defaultCfg).intSrv)
 
 	tooLargeKey := make([]byte, 1024*1024+1)
 	assertResponse(t,
@@ -194,7 +194,7 @@ func TestHashHandler(t *testing.T) {
 	validHash := [sha256.Size]byte{}
 	validHashB64 := base64.StdEncoding.EncodeToString(validHash[:])
 	e := createEnclave(&defaultCfg)
-	makeReq := makeRequestFor(e.privSrv)
+	makeReq := makeRequestFor(e.intSrv)
 
 	// Send invalid Base64.
 	assertResponse(t,
