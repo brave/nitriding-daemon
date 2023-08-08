@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"io"
 	"log"
 	"math"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -98,8 +100,15 @@ func main() {
 		elog.Fatalf("-prometheus-namespace must be set when Prometheus is used.")
 	}
 
+	// TODO: If we choose to abandon Let's Encrypt, we need to tell Go to
+	// forego certificate validation.  We shouldn't do this globally though.
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{
+		InsecureSkipVerify: true,
+	}
+
 	c := &Config{
 		FQDN:                fqdn,
+		FQDNLeader:          fqdnLeader,
 		ExtPubPort:          uint16(extPubPort),
 		ExtPrivPort:         uint16(extPrivPort),
 		IntPort:             uint16(intPort),

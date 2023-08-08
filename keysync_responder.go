@@ -98,7 +98,7 @@ func respSyncHandler(e *Enclave) http.HandlerFunc {
 		copy(theirBoxPubKey[:], theirAttDoc.PublicKey[:])
 
 		// Encrypt our key material with the provided key.
-		jsonKeyMaterial, err := json.Marshal(e.keyMaterial)
+		jsonKeyMaterial, err := json.Marshal(e.keys)
 		if err != nil {
 			http.Error(w, "failed to marshal key material", http.StatusInternalServerError)
 			return
