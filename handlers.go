@@ -275,14 +275,14 @@ func workerRegistrationHandler(e *Enclave) http.HandlerFunc {
 		}
 		worker := &url.URL{
 			Scheme: "https",
-			Host:   fmt.Sprintf("%s:%d", strIP, 9444), // TODO: Use e.cfg.ExtPrivPort.
+			Host:   fmt.Sprintf("%s:%d", strIP, e.cfg.ExtPrivPort),
 			Path:   pathSync,
 		}
 		w.WriteHeader(http.StatusOK)
 
 		go func() {
 			if err := e.syncWithWorker(worker); err != nil {
-				elog.Printf("Error syncing with worker %s: %v", worker.String(), err)
+				elog.Printf("Error syncing with worker: %v", err)
 				return
 			}
 			e.workers.register(worker)
