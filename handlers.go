@@ -19,9 +19,6 @@ import (
 )
 
 const (
-	// The maximum length of a worker registration, which is essentially just a
-	// URL.
-	maxRegistrationLen = 1024
 	// The maximum length of the key material (in bytes) that enclave
 	// applications can PUT to our HTTP API.
 	maxKeyMaterialLen = 1024 * 1024
@@ -85,7 +82,7 @@ func reqSyncHandler(e *Enclave) http.HandlerFunc {
 			return
 		}
 
-		if err := RequestKeys(addr, e.KeyMaterial); err != nil {
+		if err := RequestKeys(addr, e.AppKeys); err != nil {
 			http.Error(w, fmt.Sprintf("failed to synchronize state: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -101,17 +98,17 @@ func reqSyncHandler(e *Enclave) http.HandlerFunc {
 func getStateHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
-		s, err := e.KeyMaterial()
+		keys, err := e.AppKeys()
 		if err != nil {
 			http.Error(w, errFailedGetState.Error(), http.StatusInternalServerError)
 			return
 		}
-		n, err := w.Write(s.([]byte))
+		n, err := w.Write(keys)
 		if err != nil {
 			elog.Printf("Error writing state to client: %v", err)
 			return
 		}
-		expected := len(s.([]byte))
+		expected := len(keys)
 		if n != expected {
 			elog.Printf("Only wrote %d out of %d-byte state to client.", n, expected)
 			return
@@ -127,26 +124,29 @@ func getStateHandler(e *Enclave) http.HandlerFunc {
 // trusted enclave application.
 func putStateHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(newLimitReader(r.Body, maxKeyMaterialLen))
+		keys, err := io.ReadAll(newLimitReader(r.Body, maxKeyMaterialLen))
 		if err != nil {
 			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
 			return
 		}
-		e.SetKeyMaterial(body)
+		e.SetAppKeys(keys)
 		w.WriteHeader(http.StatusOK)
 
-		// The leader's keys have changed.  Re-synchronize the key material
-		// with all registered workers.
-		go func() {
-			for w := range e.workers.set {
-				if err := e.syncWithWorker(&w); err != nil {
-					// TODO: Failure to sync means that the enclave set is in
-					// an inconsistent state.  We should log this in
-					// Prometheus.
-					elog.Printf("Error syncing with worker: %v", err)
+		// The leader's application keys have changed.  Re-synchronize the key
+		// material with all registered workers.  If synchronization fails for a
+		// given worker, unregister it.
+		for worker := range e.workers.set {
+			go func(worker *url.URL) {
+				if err := e.syncWithWorker(worker); err != nil {
+					// TODO: Log in Prometheus.
+					// TODO: We may want to re-attempt synchronization.
+					elog.Printf("Error syncing with worker %s: %v", worker.String(), err)
+					e.workers.unregister(worker)
+				} else {
+					elog.Printf("Successfully synced with worker %s.", worker.String())
 				}
-			}
-		}()
+			}(&worker)
+		}
 	}
 }
 
@@ -254,8 +254,8 @@ func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.Handl
 
 func leaderHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		e.cfg.IsLeader = true
 		elog.Println("Designated enclave as leader.")
+		close(e.isLeader) // Signal to other parts of the code.
 
 		e.extPrivSrv.Handler.(*chi.Mux).Post(pathRegistration, workerRegistrationHandler(e))
 		elog.Println("Set up worker registration endpoint.")
@@ -273,7 +273,7 @@ func workerRegistrationHandler(e *Enclave) http.HandlerFunc {
 			http.Error(w, "error extracting IP address", http.StatusInternalServerError)
 			return
 		}
-		workerURL := &url.URL{
+		worker := &url.URL{
 			Scheme: "https",
 			Host:   fmt.Sprintf("%s:%d", strIP, 9444), // TODO: Use e.cfg.ExtPrivPort.
 			Path:   pathSync,
@@ -281,18 +281,26 @@ func workerRegistrationHandler(e *Enclave) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 
 		go func() {
-			if err := e.syncWithWorker(workerURL); err != nil {
-				elog.Printf("Error syncing with worker %s: %v", workerURL, err)
+			if err := e.syncWithWorker(worker); err != nil {
+				elog.Printf("Error syncing with worker %s: %v", worker.String(), err)
 				return
 			}
-			e.workers.register(workerURL)
-			elog.Printf("Successfully registered and synced with worker %s.", workerURL)
+			e.workers.register(worker)
+			elog.Printf("Successfully registered and synced with worker %s.", worker.String())
 		}()
 	}
 }
 
 const errNonceRequired = "nonce is required"
 
+func heartbeatHandler(keys *enclaveKeys) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, keys.hashAndB64())
+		// e.workers.updateAndPrune() // TODO
+	}
+}
+
+// TODO: Terminate worker if sync fails.
 func initSyncHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		elog.Println("New request to init key sync.")
@@ -350,6 +358,7 @@ func initSyncHandler(e *Enclave) http.HandlerFunc {
 	}
 }
 
+// TODO: Terminate worker if sync fails.
 // finishSyncHandler is called by the leader to finish key synchronization.
 func finishSyncHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -372,6 +381,10 @@ func finishSyncHandler(e *Enclave) http.HandlerFunc {
 			return
 		}
 		aux, err := e.verifyAttstn(attstn, e.nonceCache.Exists)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
 		// Decrypt the leader's enclave keys, which are encrypted with the
 		// public key that we provided earlier.

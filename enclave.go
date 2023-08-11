@@ -38,7 +38,6 @@ import (
 )
 
 // TODO: Support Let's Encrypt (if we choose to).
-// TODO: Remove defunct workers from worker set.
 // TODO: Handle key sync error edge cases.
 // TODO: Handle the case of the leader restarting.  Workers must not break.
 
@@ -78,30 +77,39 @@ var (
 // in nitriding).  All these keys are meant to be managed by a leader enclave
 // and -- if horizontal scaling is required -- synced to worker enclaves.
 type enclaveKeys struct {
+	// TODO: Add another field that contains high-entropy bytes.
 	NitridingKey  []byte `json:"nitriding_key"`
 	NitridingCert []byte `json:"nitriding_cert"`
 	AppKeys       []byte `json:"app_keys"`
+}
+
+// hashAndB64 returns the Base64-encoded hash over our key material.  The
+// resulting string is not confidential as it's impractical to reverse the key
+// material.
+func (e *enclaveKeys) hashAndB64() string {
+	keys := append(append(e.NitridingCert, e.NitridingKey...), e.AppKeys...)
+	hash := sha256.Sum256(keys)
+	return base64.StdEncoding.EncodeToString(hash[:])
 }
 
 // Enclave represents a service running inside an AWS Nitro Enclave.
 type Enclave struct {
 	sync.RWMutex
 	attester
-	cfg               *Config
-	extPubSrv         *http.Server
-	extPrivSrv        *http.Server
-	intSrv            *http.Server
-	promSrv           *http.Server
-	revProxy          *httputil.ReverseProxy
-	hashes            *AttestationHashes
-	promRegistry      *prometheus.Registry
-	metrics           *metrics
-	workers           *workers
-	nonceCache        *cache
-	keys              *enclaveKeys
-	ephemeralSyncKeys *boxKey // TODO
-	ready, stop       chan bool
-	httpsCert         *certRetriever
+	cfg                   *Config
+	extPubSrv, extPrivSrv *http.Server
+	intSrv                *http.Server
+	promSrv               *http.Server
+	revProxy              *httputil.ReverseProxy
+	hashes                *AttestationHashes
+	promRegistry          *prometheus.Registry
+	metrics               *metrics
+	workers               *workers
+	nonceCache            *cache
+	keys                  *enclaveKeys
+	ephemeralSyncKeys     *boxKey // TODO
+	ready, stop, isLeader chan bool
+	httpsCert             *certRetriever
 }
 
 // Config represents the configuration of our enclave service.
@@ -115,11 +123,6 @@ type Config struct {
 	// enclave, which coordinates enclave synchronization.  Only set this field
 	// if horizontal scaling is required.
 	FQDNLeader string
-
-	// IsLeader will be set to true if the enclave is designated as leader for
-	// enclave synchronization.  Leader designation happens at runtime, by
-	// calling an HTTP handler.
-	IsLeader bool
 
 	// ExtPubPort contains the TCP port that the public Web server should
 	// listen on, e.g. 443.  This port is not *directly* reachable by the
@@ -226,6 +229,12 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// isScalingEnabled returns true if horizontal enclave scaling is enabled in our
+// enclave configuration.
+func (c *Config) isScalingEnabled() bool {
+	return c.FQDNLeader != ""
+}
+
 // String returns a string representation of the enclave's configuration.
 func (c *Config) String() string {
 	s, err := json.MarshalIndent(c, "", "  ")
@@ -266,9 +275,10 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		metrics:      newMetrics(reg, cfg.PrometheusNamespace),
 		nonceCache:   newCache(defaultItemExpiry),
 		hashes:       new(AttestationHashes),
-		workers:      newWorkers(),
+		workers:      newWorkers(time.Minute),
 		stop:         make(chan bool),
 		ready:        make(chan bool),
+		isLeader:     make(chan bool),
 	}
 
 	// Increase the maximum number of idle connections per host.  This is
@@ -366,22 +376,16 @@ func (e *Enclave) Start() error {
 		return fmt.Errorf("%s: %w", errPrefix, err)
 	}
 
-	if e.cfg.FQDNLeader == "" {
-		return errors.New("leader enclave's FQDN is unset")
-	}
-	// Prepare the leader's registration URL and register the worker.  At the
-	// time of making this request, the leader is still untrusted but that's
-	// fine.  The sensitive part (i.e., key synchronization) happens in a
-	// subsequent step, and is secured by mutual attestation document
-	// verification.
-	// TODO: Is this where/how we want to initiate the process?
 	// TODO: Ideally, the leader enclave would not call this function.
-	if err := e.syncWithLeader(&url.URL{
-		Scheme: "https",
-		Host:   fmt.Sprintf("%s:%d", e.cfg.FQDNLeader, 8444), // TODO: Use e.cfg.ExtPrivPort.
-		Path:   pathRegistration,
-	}); err != nil {
-		elog.Printf("Error syncing with leader: %v", err)
+	if e.cfg.isScalingEnabled() {
+		if err := e.syncWithLeader(&url.URL{
+			Scheme: "https",
+			Host:   fmt.Sprintf("%s:%d", e.cfg.FQDNLeader, e.cfg.ExtPrivPort),
+			Path:   pathRegistration,
+		}); err != nil {
+			elog.Fatalf("Error syncing with leader: %v", err)
+		}
+		elog.Println("Successfully synced with leader.")
 	}
 
 	return nil
@@ -394,6 +398,9 @@ func (e *Enclave) Stop() error {
 		return err
 	}
 	if err := e.extPubSrv.Shutdown(context.Background()); err != nil {
+		return err
+	}
+	if err := e.extPrivSrv.Shutdown(context.Background()); err != nil {
 		return err
 	}
 	if err := e.promSrv.Shutdown(context.Background()); err != nil {
@@ -615,22 +622,20 @@ func (e *Enclave) setCertFingerprint(rawData []byte) error {
 	return nil
 }
 
-// SetKeyMaterial registers the enclave's key material (e.g., secret encryption
-// keys) as being ready to be synchronized to other, identical enclaves.  Note
-// that the key material's underlying data structure must be marshallable to
-// JSON.
-//
-// This is only necessary if you intend to scale enclaves horizontally.  If you
-// will only ever run a single enclave, ignore this function.
-func (e *Enclave) SetKeyMaterial(appKeys []byte) {
+// SetAppKeys registers the enclave application's key material (e.g., secret
+// encryption keys, or what have you), so it can be synchronized with worker
+// enclaves.  This is only necessary if horizontal enclave scaling is required.
+func (e *Enclave) SetAppKeys(appKeys []byte) {
 	e.Lock()
 	defer e.Unlock()
 
 	e.keys.AppKeys = appKeys
 }
 
-// KeyMaterial returns the key material or, if none was registered, an error.
-func (e *Enclave) KeyMaterial() (any, error) {
+// AppKeys returns the enclave application's key material.  This allows a worker
+// enclave to retrieve the key material that it synchronized from the leader
+// enclave.
+func (e *Enclave) AppKeys() ([]byte, error) {
 	e.RLock()
 	defer e.RUnlock()
 
@@ -641,16 +646,34 @@ func (e *Enclave) KeyMaterial() (any, error) {
 }
 
 // syncWithLeader is called by worker enclaves to initiate the process of key
-// synchronization.
+// synchronization.  The worker tries to register with the leader for a total of
+// one minute, after which it gives up and terminates.
 func (e *Enclave) syncWithLeader(leader *url.URL) error {
-	resp, err := http.Post(leader.String(), "text/plain", nil)
-	if err != nil {
-		return err
+	elog.Println("Attempting to sync with leader.")
+
+	// Keep on trying every five seconds for a minute.
+	ctx, _ := context.WithTimeout(context.Background(), time.Minute)
+	ticker := time.NewTicker(5 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return errors.New("timed out syncing with leader")
+		case <-e.isLeader:
+			elog.Println("This enclave became leader.  Aborting key sync.")
+			return nil
+		case <-ticker.C:
+			resp, err := http.Post(leader.String(), "text/plain", nil)
+			if err != nil {
+				elog.Printf("POST request to leader failed: %v", err)
+				break
+			}
+			if resp.StatusCode != http.StatusOK {
+				elog.Printf("Leader returned HTTP code %d.", resp.StatusCode)
+				break
+			}
+			return nil
+		}
 	}
-	if resp.StatusCode != http.StatusOK {
-		return errNo200(resp.StatusCode)
-	}
-	return nil
 }
 
 // syncWithWorker is called by the leader enclave right after a worker
@@ -681,6 +704,9 @@ func (e *Enclave) syncWithWorker(worker *url.URL) error {
 	// Step 3: Verify the worker's attestation document and extract its
 	// auxiliary information.
 	b64Attstn, err := io.ReadAll(newLimitReader(resp.Body, maxAttDocLen))
+	if err != nil {
+		return err
+	}
 	resp.Body.Close()
 	attstn, err := base64.StdEncoding.DecodeString(string(b64Attstn))
 	if err != nil {

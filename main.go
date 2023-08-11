@@ -43,7 +43,7 @@ func main() {
 	flag.StringVar(&fqdn, "fqdn", "",
 		"FQDN of the enclave application (e.g., \"example.com\").")
 	flag.StringVar(&fqdnLeader, "fqdn-leader", "",
-		"FQDN of the leader enclave (e.g., \"leader.example.com\").")
+		"FQDN of the leader enclave (e.g., \"leader.example.com\").  Setting this enables key synchronization.")
 	flag.StringVar(&appURL, "appurl", "",
 		"Code repository of the enclave application (e.g., \"github.com/foo/bar\").")
 	flag.StringVar(&appWebSrv, "appwebsrv", "",
