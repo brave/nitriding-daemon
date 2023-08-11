@@ -670,7 +670,7 @@ func (e *Enclave) syncWithLeader(leader *url.URL) error {
 				elog.Printf("Leader returned HTTP code %d.", resp.StatusCode)
 				break
 			}
-			elog.Println("Successfully synced with leader.")
+			elog.Println("Successfully registered with leader.")
 			return nil
 		}
 	}

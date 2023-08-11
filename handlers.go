@@ -303,7 +303,7 @@ func heartbeatHandler(keys *enclaveKeys) http.HandlerFunc {
 // TODO: Terminate worker if sync fails.
 func initSyncHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		elog.Println("New request to init key sync.")
+		elog.Println("Received leader's request to initiate key sync.")
 
 		// Extract the leader's nonce from the URL.
 		hexNonce := r.URL.Query().Get("nonce")
@@ -362,7 +362,7 @@ func initSyncHandler(e *Enclave) http.HandlerFunc {
 // finishSyncHandler is called by the leader to finish key synchronization.
 func finishSyncHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		elog.Println("New request to finish key sync.")
+		elog.Println("Received leader's request to complete key sync.")
 
 		// Read the leader's Base64-encoded attestation document.
 		maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
@@ -412,7 +412,6 @@ func finishSyncHandler(e *Enclave) http.HandlerFunc {
 			return
 		}
 		e.httpsCert.set(&cert)
-
-		elog.Printf("Leader's enclave keys: %s (%s)", string(decrypted), decrypted)
+		elog.Println("Successfully synced with leader.")
 	}
 }

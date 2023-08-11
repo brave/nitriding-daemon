@@ -26,7 +26,7 @@ func (w *workers) register(worker *url.URL) {
 	defer w.Unlock()
 
 	w.set[*worker] = time.Now()
-	elog.Printf("Registered worker %s.  %d workers now registered.",
+	elog.Printf("Registered worker %s; %d worker(s) now registered.",
 		worker.String(), len(w.set))
 }
 
@@ -35,7 +35,7 @@ func (w *workers) unregister(worker *url.URL) {
 	defer w.Unlock()
 
 	delete(w.set, *worker)
-	elog.Printf("Unregistered worker %s.  %d workers left.",
+	elog.Printf("Unregistered worker %s; %d worker(s) left.",
 		worker.String(), len(w.set))
 }
 
