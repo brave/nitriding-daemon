@@ -650,28 +650,37 @@ func (e *Enclave) AppKeys() ([]byte, error) {
 func (e *Enclave) syncWithLeader(leader *url.URL) error {
 	elog.Println("Attempting to sync with leader.")
 
+	errChan := make(chan error)
+	register := func(e chan error) {
+		resp, err := http.Post(leader.String(), "text/plain", nil)
+		if err != nil {
+			e <- err
+		}
+		if resp.StatusCode != http.StatusOK {
+			e <- fmt.Errorf("leader returned HTTP code %d", resp.StatusCode)
+		}
+		e <- nil
+	}
+	go register(errChan)
+
 	// Keep on trying every five seconds for a minute.
 	ctx, _ := context.WithTimeout(context.Background(), time.Minute)
 	ticker := time.NewTicker(5 * time.Second)
 	for {
 		select {
+		case err := <-errChan:
+			if err == nil {
+				elog.Println("Successfully registered with leader.")
+				return nil
+			}
+			elog.Printf("Error registering with leader: %v", err)
 		case <-ctx.Done():
 			return errors.New("timed out syncing with leader")
 		case <-e.isLeader:
-			elog.Println("This enclave became leader.  Aborting key sync.")
+			elog.Println("We became leader. Aborting key sync.")
 			return nil
 		case <-ticker.C:
-			resp, err := http.Post(leader.String(), "text/plain", nil)
-			if err != nil {
-				elog.Printf("POST request to leader failed: %v", err)
-				break
-			}
-			if resp.StatusCode != http.StatusOK {
-				elog.Printf("Leader returned HTTP code %d.", resp.StatusCode)
-				break
-			}
-			elog.Println("Successfully registered with leader.")
-			return nil
+			go register(errChan)
 		}
 	}
 }
