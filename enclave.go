@@ -385,7 +385,6 @@ func (e *Enclave) Start() error {
 		}); err != nil {
 			elog.Fatalf("Error syncing with leader: %v", err)
 		}
-		elog.Println("Successfully synced with leader.")
 	}
 
 	return nil
@@ -671,6 +670,7 @@ func (e *Enclave) syncWithLeader(leader *url.URL) error {
 				elog.Printf("Leader returned HTTP code %d.", resp.StatusCode)
 				break
 			}
+			elog.Println("Successfully synced with leader.")
 			return nil
 		}
 	}
