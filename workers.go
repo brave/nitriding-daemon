@@ -21,6 +21,13 @@ func newWorkers(timeout time.Duration) *workers {
 	}
 }
 
+func (w *workers) length() int {
+	w.RLock()
+	defer w.RUnlock()
+
+	return len(w.set)
+}
+
 func (w *workers) register(worker *url.URL) {
 	w.Lock()
 	defer w.Unlock()

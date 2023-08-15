@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	cryptoRand "crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -16,14 +15,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	_ "net/http/pprof"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -34,11 +31,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"golang.org/x/crypto/acme/autocert"
-	"golang.org/x/crypto/nacl/box"
 )
 
 // TODO: Support Let's Encrypt (if we choose to).
-// TODO: Handle key sync error edge cases.
 // TODO: Handle the case of the leader restarting.  Workers must not break.
 
 const (
@@ -61,27 +56,16 @@ const (
 	pathConfig       = "/enclave/config"
 	pathLeader       = "/enclave/leader"
 	pathRegistration = "/enclave/registration"
+	pathHeartbeat    = "/enclave/heartbeat"
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
 )
 
 var (
-	errNoKeyMaterial  = errors.New("no key material registered")
 	errCfgMissingFQDN = errors.New("given config is missing FQDN")
 	errCfgMissingPort = errors.New("given config is missing port")
 )
-
-// enclaveKeys holds key material for nitriding itself (the HTTPS certificate)
-// and for the enclave application (whatever the application wants to "store"
-// in nitriding).  All these keys are meant to be managed by a leader enclave
-// and -- if horizontal scaling is required -- synced to worker enclaves.
-type enclaveKeys struct {
-	// TODO: Add another field that contains high-entropy bytes.
-	NitridingKey  []byte `json:"nitriding_key"`
-	NitridingCert []byte `json:"nitriding_cert"`
-	AppKeys       []byte `json:"app_keys"`
-}
 
 // hashAndB64 returns the Base64-encoded hash over our key material.  The
 // resulting string is not confidential as it's impractical to reverse the key
@@ -96,20 +80,18 @@ func (e *enclaveKeys) hashAndB64() string {
 type Enclave struct {
 	sync.RWMutex
 	attester
-	cfg                   *Config
-	extPubSrv, extPrivSrv *http.Server
-	intSrv                *http.Server
-	promSrv               *http.Server
-	revProxy              *httputil.ReverseProxy
-	hashes                *AttestationHashes
-	promRegistry          *prometheus.Registry
-	metrics               *metrics
-	workers               *workers
-	nonceCache            *cache
-	keys                  *enclaveKeys
-	ephemeralSyncKeys     *boxKey // TODO
-	ready, stop, isLeader chan bool
-	httpsCert             *certRetriever
+	cfg                       *Config
+	extPubSrv, extPrivSrv     *http.Server
+	intSrv                    *http.Server
+	promSrv                   *http.Server
+	revProxy                  *httputil.ReverseProxy
+	hashes                    *AttestationHashes
+	promRegistry              *prometheus.Registry
+	metrics                   *metrics
+	workers                   *workers
+	keys                      *enclaveKeys
+	ready, stop, becameLeader chan struct{}
+	httpsCert                 *certRetriever
 }
 
 // Config represents the configuration of our enclave service.
@@ -273,12 +255,11 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		keys:         &enclaveKeys{},
 		promRegistry: reg,
 		metrics:      newMetrics(reg, cfg.PrometheusNamespace),
-		nonceCache:   newCache(defaultItemExpiry),
 		hashes:       new(AttestationHashes),
 		workers:      newWorkers(time.Minute),
-		stop:         make(chan bool),
-		ready:        make(chan bool),
-		isLeader:     make(chan bool),
+		stop:         make(chan struct{}),
+		ready:        make(chan struct{}),
+		becameLeader: make(chan struct{}),
 	}
 
 	// Increase the maximum number of idle connections per host.  This is
@@ -308,15 +289,14 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	// Register external public HTTP API.
 	m := e.extPubSrv.Handler.(*chi.Mux)
 	m.Get(pathAttestation, attestationHandler(e.cfg.UseProfiling, e.hashes))
-	m.Get(pathNonce, nonceHandler(e))
 	m.Get(pathRoot, rootHandler(e.cfg))
 	m.Get(pathConfig, configHandler(e.cfg))
 
 	// Register external but private HTTP API.
 	m = e.extPrivSrv.Handler.(*chi.Mux)
 	m.Get(pathLeader, leaderHandler(e))
-	m.Get(pathSync, initSyncHandler(e))
-	m.Post(pathSync, finishSyncHandler(e))
+	m.Get(pathHeartbeat, heartbeatHandler(e))
+	m.Handle(pathSync, asWorker(e.installKeys, e.becameLeader))
 
 	// Register enclave-internal HTTP API.
 	m = e.intSrv.Handler.(*chi.Mux)
@@ -340,6 +320,18 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	}
 
 	return e, nil
+}
+
+// installKeys installs the given enclave keys.  Worker enclaves do this after
+// key synchronization.
+func (e *Enclave) installKeys(keys *enclaveKeys) error {
+	e.keys.set(keys)
+	cert, err := tls.X509KeyPair(keys.NitridingCert, keys.NitridingKey)
+	if err != nil {
+		return err
+	}
+	e.httpsCert.set(&cert)
+	return nil
 }
 
 // Start starts the Nitro Enclave.  If something goes wrong, the function
@@ -376,9 +368,8 @@ func (e *Enclave) Start() error {
 		return fmt.Errorf("%s: %w", errPrefix, err)
 	}
 
-	// TODO: Ideally, the leader enclave would not call this function.
 	if e.cfg.isScalingEnabled() {
-		if err := e.syncWithLeader(&url.URL{
+		if err := asWorker(e.installKeys, e.becameLeader).registerWith(&url.URL{
 			Scheme: "https",
 			Host:   fmt.Sprintf("%s:%d", e.cfg.FQDNLeader, e.cfg.ExtPrivPort),
 			Path:   pathRegistration,
@@ -522,8 +513,7 @@ func (e *Enclave) genSelfSignedCert() error {
 	if pemKey == nil {
 		elog.Fatal("Failed to encode key to PEM.")
 	}
-	e.keys.NitridingKey = pemKey
-	e.keys.NitridingCert = pemCert
+	e.keys.setNitridingKeys(pemKey, pemCert)
 
 	cert, err := tls.X509KeyPair(pemCert, pemKey)
 	if err != nil {
@@ -621,145 +611,16 @@ func (e *Enclave) setCertFingerprint(rawData []byte) error {
 	return nil
 }
 
-// SetAppKeys registers the enclave application's key material (e.g., secret
-// encryption keys, or what have you), so it can be synchronized with worker
-// enclaves.  This is only necessary if horizontal enclave scaling is required.
-func (e *Enclave) SetAppKeys(appKeys []byte) {
-	e.Lock()
-	defer e.Unlock()
-
-	e.keys.AppKeys = appKeys
-}
-
-// AppKeys returns the enclave application's key material.  This allows a worker
-// enclave to retrieve the key material that it synchronized from the leader
-// enclave.
-func (e *Enclave) AppKeys() ([]byte, error) {
-	e.RLock()
-	defer e.RUnlock()
-
-	if e.keys.AppKeys == nil {
-		return nil, errNoKeyMaterial
-	}
-	return e.keys.AppKeys, nil
-}
-
-// syncWithLeader is called by worker enclaves to initiate the process of key
-// synchronization.  The worker tries to register with the leader for a total of
-// one minute, after which it gives up and terminates.
-func (e *Enclave) syncWithLeader(leader *url.URL) error {
-	elog.Println("Attempting to sync with leader.")
-
-	errChan := make(chan error)
-	register := func(e chan error) {
-		resp, err := http.Post(leader.String(), "text/plain", nil)
-		if err != nil {
-			e <- err
-		}
-		if resp.StatusCode != http.StatusOK {
-			e <- fmt.Errorf("leader returned HTTP code %d", resp.StatusCode)
-		}
-		e <- nil
-	}
-	go register(errChan)
-
-	// Keep on trying every five seconds for a minute.
-	ctx, _ := context.WithTimeout(context.Background(), time.Minute)
-	ticker := time.NewTicker(5 * time.Second)
-	for {
-		select {
-		case err := <-errChan:
-			if err == nil {
-				elog.Println("Successfully registered with leader.")
-				return nil
-			}
-			elog.Printf("Error registering with leader: %v", err)
-		case <-ctx.Done():
-			return errors.New("timed out syncing with leader")
-		case <-e.isLeader:
-			elog.Println("We became leader. Aborting key sync.")
-			return nil
-		case <-ticker.C:
-			go register(errChan)
-		}
-	}
-}
-
-// syncWithWorker is called by the leader enclave right after a worker
-// registers itself with the leader enclave.
-func (e *Enclave) syncWithWorker(worker *url.URL) error {
-	elog.Println("Initiating key synchronization with worker.")
-
-	// Step 1: Create a nonce that the worker must embed in its attestation
-	// document to prevent replay attacks.
-	nonce, err := newNonce()
+func (e *Enclave) httpClientToSyncURL(r *http.Request) (*url.URL, error) {
+	// Go's HTTP server sets RemoteAddr to IP:port:
+	// https://pkg.go.dev/net/http#Request
+	strIP, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	e.nonceCache.Add(nonce.B64())
-
-	// Step 2: Request the worker's attestation document, and provide the
-	// previously-generated nonce.
-	reqURL := *worker
-	reqURL.RawQuery = fmt.Sprintf("nonce=%x", nonce)
-	resp, err := http.Get(reqURL.String())
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return errNo200(resp.StatusCode)
-	}
-
-	// Step 3: Verify the worker's attestation document and extract its
-	// auxiliary information.
-	b64Attstn, err := io.ReadAll(newLimitReader(resp.Body, maxAttDocLen))
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	attstn, err := base64.StdEncoding.DecodeString(string(b64Attstn))
-	if err != nil {
-		return err
-	}
-	workerAux, err := e.verifyAttstn(attstn, e.nonceCache.Exists)
-	if err != nil {
-		return err
-	}
-
-	// Step 4: Encrypt the leader's enclave keys with the ephemeral public key
-	// that the worker put into its auxiliary information.
-	pubKey := &[boxKeyLen]byte{}
-	copy(pubKey[:], workerAux.(*workerAuxInfo).PublicKey[:])
-	jsonKeys, err := json.Marshal(e.keys)
-	if err != nil {
-		return err
-	}
-	var encrypted []byte
-	encrypted, err = box.SealAnonymous(nil, jsonKeys, pubKey, cryptoRand.Reader)
-	if err != nil {
-		return err
-	}
-
-	// Step 5: Create the leader's auxiliary information, consisting of the
-	// worker's nonce and the encrypted enclave keys.
-	leaderAux := &leaderAuxInfo{
-		WorkersNonce: workerAux.(*workerAuxInfo).WorkersNonce,
-		EnclaveKeys:  encrypted,
-	}
-	attstn, err = e.createAttstn(leaderAux)
-	if err != nil {
-		return err
-	}
-	strAttstn := base64.StdEncoding.EncodeToString(attstn)
-
-	// Step 6: Send the leader's attestation document to the worker.
-	resp, err = http.Post(worker.String(), "text/plain", strings.NewReader(strAttstn))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return errNo200(resp.StatusCode)
-	}
-
-	return nil
+	return &url.URL{
+		Scheme: "https", // Leader and workers use HTTPS to communicate.
+		Host:   fmt.Sprintf("%s:%d", strIP, e.cfg.ExtPrivPort),
+		Path:   pathSync,
+	}, nil
 }

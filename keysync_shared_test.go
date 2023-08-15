@@ -4,31 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"testing"
-	"time"
 )
-
-var (
-	null = make([]byte, 48) // An empty PCR value.
-)
-
-// remoteAttInfo contains everything that we need to verify a remote enclave's
-// attestation information.
-type remoteAttInfo struct {
-	pubKey     [boxKeyLen]byte
-	privKey    [boxKeyLen]byte
-	nonce      nonce
-	pcr        map[uint][]byte
-	attDocTime time.Time
-	attDoc     string
-}
-
-func mustParse(timeStr string) time.Time {
-	t, err := time.Parse(time.RFC3339, timeStr)
-	if err != nil {
-		panic(err)
-	}
-	return t
-}
 
 func failOnErr(t *testing.T, err error) {
 	t.Helper()

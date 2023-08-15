@@ -16,7 +16,7 @@ import (
 // implement a dummy attester that works without the AWS Nitro hypervisor.
 type attester interface {
 	createAttstn(auxInfo) ([]byte, error)
-	verifyAttstn(doc []byte, isOurNonce func(string) bool) (auxInfo, error)
+	verifyAttstn([]byte, nonce) (auxInfo, error)
 }
 
 type auxInfo interface{}
@@ -56,7 +56,7 @@ func (*dummyAttester) createAttstn(aux auxInfo) ([]byte, error) {
 	return json.Marshal(aux)
 }
 
-func (*dummyAttester) verifyAttstn(doc []byte, isOurNonce func(string) bool) (auxInfo, error) {
+func (*dummyAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 	var w workerAuxInfo
 	var l leaderAuxInfo
 
@@ -65,7 +65,8 @@ func (*dummyAttester) verifyAttstn(doc []byte, isOurNonce func(string) bool) (au
 		return nil, err
 	}
 	if len(w.WorkersNonce) == nonceLen && len(w.LeadersNonce) == nonceLen && w.PublicKey != nil {
-		if !isOurNonce(w.LeadersNonce.B64()) {
+		if n.B64() != w.LeadersNonce.B64() {
+			fmt.Printf("'%s' / '%s'", n.B64(), w.LeadersNonce.B64())
 			return nil, errors.New("leader nonce not in cache")
 		}
 		elog.Println(w)
@@ -77,7 +78,7 @@ func (*dummyAttester) verifyAttstn(doc []byte, isOurNonce func(string) bool) (au
 		return nil, err
 	}
 	if len(l.WorkersNonce) == nonceLen && l.EnclaveKeys != nil {
-		if !isOurNonce(l.WorkersNonce.B64()) {
+		if n.B64() != l.WorkersNonce.B64() {
 			return nil, errors.New("worker nonce not in cache")
 		}
 		elog.Println(l)
@@ -130,7 +131,7 @@ func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 	return res.Attestation.Document, nil
 }
 
-func (*nitroAttester) verifyAttstn(doc []byte, isOurNonce func(string) bool) (auxInfo, error) {
+func (*nitroAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 	errStr := "error verifying attestation document"
 	// Verify the remote enclave's attestation document before doing anything
 	// with it.
@@ -153,7 +154,7 @@ func (*nitroAttester) verifyAttstn(doc []byte, isOurNonce func(string) bool) (au
 	// Verify that the remote enclave's attestation document contains the nonce
 	// that we asked it to embed.
 	b64Nonce := base64.StdEncoding.EncodeToString(their.Document.Nonce)
-	if !isOurNonce(b64Nonce) {
+	if n.B64() == b64Nonce {
 		return nil, fmt.Errorf("%s: nonce %s not in cache", errStr, b64Nonce)
 	}
 

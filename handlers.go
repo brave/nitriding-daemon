@@ -2,20 +2,16 @@ package main
 
 import (
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/crypto/nacl/box"
 )
 
 const (
@@ -27,11 +23,9 @@ const (
 )
 
 var (
-	errFailedReqBody  = errors.New("failed to read request body")
-	errFailedGetState = errors.New("failed to retrieve saved state")
-	errNoAddr         = errors.New("parameter 'addr' not found")
-	errBadSyncAddr    = errors.New("invalid 'addr' parameter for sync")
-	errHashWrongSize  = errors.New("given hash is of invalid size")
+	errFailedReqBody = errors.New("failed to read request body")
+	errHashWrongSize = errors.New("given hash is of invalid size")
+	errNoBase64      = errors.New("no Base64 given")
 )
 
 func errNo200(code int) error {
@@ -56,40 +50,6 @@ func rootHandler(cfg *Config) http.HandlerFunc {
 	}
 }
 
-// reqSyncHandler returns a handler that lets the enclave application request
-// state synchronization, which copies the given remote enclave's state into
-// our state.
-//
-// This is an enclave-internal endpoint that can only be accessed by the
-// trusted enclave application.
-//
-// FIXME: https://github.com/brave/nitriding-daemon/issues/10
-func reqSyncHandler(e *Enclave) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		// The 'addr' parameter must have the following form:
-		// https://example.com:443
-		addrs, ok := q["addr"]
-		if !ok {
-			http.Error(w, errNoAddr.Error(), http.StatusBadRequest)
-			return
-		}
-		addr := addrs[0]
-
-		// Are we dealing with a well-formed URL?
-		if _, err := url.Parse(addr); err != nil {
-			http.Error(w, errBadSyncAddr.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if err := RequestKeys(addr, e.AppKeys); err != nil {
-			http.Error(w, fmt.Sprintf("failed to synchronize state: %v", err), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}
-}
-
 // getStateHandler returns a handler that lets the enclave application retrieve
 // previously-set state.
 //
@@ -98,17 +58,13 @@ func reqSyncHandler(e *Enclave) http.HandlerFunc {
 func getStateHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
-		keys, err := e.AppKeys()
-		if err != nil {
-			http.Error(w, errFailedGetState.Error(), http.StatusInternalServerError)
-			return
-		}
-		n, err := w.Write(keys)
+		appKeys := e.keys.getAppKeys()
+		n, err := w.Write(appKeys)
 		if err != nil {
 			elog.Printf("Error writing state to client: %v", err)
 			return
 		}
-		expected := len(keys)
+		expected := len(appKeys)
 		if n != expected {
 			elog.Printf("Only wrote %d out of %d-byte state to client.", n, expected)
 			return
@@ -129,7 +85,7 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
 			return
 		}
-		e.SetAppKeys(keys)
+		e.keys.setAppKeys(keys)
 		w.WriteHeader(http.StatusOK)
 
 		// The leader's application keys have changed.  Re-synchronize the key
@@ -137,13 +93,12 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 		// given worker, unregister it.
 		for worker := range e.workers.set {
 			go func(worker *url.URL) {
-				if err := e.syncWithWorker(worker); err != nil {
+				if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
 					// TODO: Log in Prometheus.
-					// TODO: We may want to re-attempt synchronization.
-					elog.Printf("Error syncing with worker %s: %v", worker.String(), err)
+					elog.Printf("Error re-syncing with worker %s: %v", worker.String(), err)
 					e.workers.unregister(worker)
 				} else {
-					elog.Printf("Successfully synced with worker %s.", worker.String())
+					elog.Printf("Successfully re-synced with worker %s.", worker.String())
 				}
 			}(&worker)
 		}
@@ -255,7 +210,7 @@ func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.Handl
 func leaderHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		elog.Println("Designated enclave as leader.")
-		close(e.isLeader) // Signal to other parts of the code.
+		close(e.becameLeader) // Signal to other parts of the code.
 
 		e.extPrivSrv.Handler.(*chi.Mux).Post(pathRegistration, workerRegistrationHandler(e))
 		elog.Println("Set up worker registration endpoint.")
@@ -266,22 +221,14 @@ func leaderHandler(e *Enclave) http.HandlerFunc {
 
 func workerRegistrationHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Go's HTTP server sets RemoteAddr to IP:port:
-		// https://pkg.go.dev/net/http#Request
-		strIP, _, err := net.SplitHostPort(r.RemoteAddr)
+		worker, err := e.httpClientToSyncURL(r)
 		if err != nil {
-			http.Error(w, "error extracting IP address", http.StatusInternalServerError)
-			return
-		}
-		worker := &url.URL{
-			Scheme: "https",
-			Host:   fmt.Sprintf("%s:%d", strIP, e.cfg.ExtPrivPort),
-			Path:   pathSync,
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 		w.WriteHeader(http.StatusOK)
 
 		go func() {
-			if err := e.syncWithWorker(worker); err != nil {
+			if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
 				elog.Printf("Error syncing with worker: %v", err)
 				return
 			}
@@ -291,127 +238,17 @@ func workerRegistrationHandler(e *Enclave) http.HandlerFunc {
 	}
 }
 
-const errNonceRequired = "nonce is required"
-
-func heartbeatHandler(keys *enclaveKeys) http.HandlerFunc {
+func heartbeatHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, keys.hashAndB64())
-		// e.workers.updateAndPrune() // TODO
-	}
-}
+		// TODO: Use AttestationHashes instead.
+		fmt.Fprintln(w, e.keys.hashAndB64())
 
-// TODO: Terminate worker if sync fails.
-func initSyncHandler(e *Enclave) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		elog.Println("Received leader's request to initiate key sync.")
-
-		// Extract the leader's nonce from the URL.
-		hexNonce := r.URL.Query().Get("nonce")
-		if hexNonce == "" {
-			http.Error(w, errNonceRequired, http.StatusBadRequest)
-			return
-		}
-
-		nonceSlice, err := hex.DecodeString(hexNonce)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if len(nonceSlice) != nonceLen {
-			http.Error(w, "invalid nonce length", http.StatusBadRequest)
-			return
-		}
-		var leadersNonce nonce
-		copy(leadersNonce[:], nonceSlice)
-
-		// Create the worker's nonce and add it to our nonce cache, so it can
-		// later be verified.
-		workersNonce, err := newNonce()
+		// Take note of the worker still being alive.
+		worker, err := e.httpClientToSyncURL(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		e.nonceCache.Add(workersNonce.B64())
-
-		// Create an ephemeral key that the leader is going to use to encrypt
-		// its enclave keys.
-		boxKey, err := newBoxKey()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		e.ephemeralSyncKeys = boxKey // TODO: Could be more elegant.
-
-		// Create and return the worker's Base64-encoded attestation document.
-		aux := &workerAuxInfo{
-			WorkersNonce: workersNonce,
-			LeadersNonce: leadersNonce,
-			PublicKey:    boxKey.pubKey[:],
-		}
-		attstn, err := e.createAttstn(aux)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		fmt.Fprintln(w, base64.StdEncoding.EncodeToString(attstn))
-	}
-}
-
-// TODO: Terminate worker if sync fails.
-// finishSyncHandler is called by the leader to finish key synchronization.
-func finishSyncHandler(e *Enclave) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		elog.Println("Received leader's request to complete key sync.")
-
-		// Read the leader's Base64-encoded attestation document.
-		maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
-		b64Attstn, err := io.ReadAll(newLimitReader(r.Body, maxReadLen))
-		if err != nil {
-			elog.Printf("Failed to read http body: %v", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		elog.Printf("Leader's attstn doc: %v", string(b64Attstn))
-
-		// Decode Base64 to byte slice.
-		attstn, err := base64.StdEncoding.DecodeString(string(b64Attstn))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		aux, err := e.verifyAttstn(attstn, e.nonceCache.Exists)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		// Decrypt the leader's enclave keys, which are encrypted with the
-		// public key that we provided earlier.
-		decrypted, ok := box.OpenAnonymous(
-			nil,
-			aux.(*leaderAuxInfo).EnclaveKeys,
-			e.ephemeralSyncKeys.pubKey,
-			e.ephemeralSyncKeys.privKey)
-		if !ok {
-			http.Error(w, "error decrypting enclave keys", http.StatusBadRequest)
-			return
-		}
-		e.ephemeralSyncKeys = nil // Clear the ephemeral key material.
-
-		// Set the leader's enclave keys.
-		var keys enclaveKeys
-		if err := json.Unmarshal(decrypted, &keys); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		cert, err := tls.X509KeyPair(keys.NitridingCert, keys.NitridingKey)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		e.httpsCert.set(&cert)
-		elog.Println("Successfully synced with leader.")
+		e.workers.updateAndPrune(worker)
 	}
 }

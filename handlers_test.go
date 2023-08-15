@@ -67,7 +67,7 @@ func assertResponse(t *testing.T, actual, expected *http.Response) {
 }
 
 func TestRootHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).pubSrv)
+	makeReq := makeRequestFor(createEnclave(&defaultCfg).extPubSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathRoot, nil),
@@ -91,25 +91,6 @@ func signalReady(t *testing.T, e *Enclave) {
 	// server is alive.  Let's wait briefly to give the Web server enough time
 	// to start.  An ugly test is better than no test.
 	time.Sleep(100 * time.Millisecond)
-}
-
-func TestSyncHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).intSrv)
-
-	assertResponse(t,
-		makeReq(http.MethodGet, pathSync, nil),
-		newResp(http.StatusBadRequest, errNoAddr.Error()),
-	)
-
-	assertResponse(t,
-		makeReq(http.MethodGet, pathSync+"?addr=:foo", nil),
-		newResp(http.StatusBadRequest, errBadSyncAddr.Error()),
-	)
-
-	assertResponse(t,
-		makeReq(http.MethodGet, pathSync+"?addr=foobar", nil),
-		newResp(http.StatusInternalServerError, ""), // The exact error is convoluted, so we skip comparison.
-	)
 }
 
 func TestStateHandlers(t *testing.T) {
@@ -172,7 +153,7 @@ func TestProxyHandler(t *testing.T) {
 	// Skip certificate validation because we are using a self-signed
 	// certificate in this test.
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	nitridingSrv := "https://127.0.0.1" + e.pubSrv.Addr
+	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPubPort)
 
 	// Request the enclave's index page.  Nitriding is going to return it.
 	resp, err := http.Get(nitridingSrv + pathRoot)
@@ -242,7 +223,7 @@ func TestReadiness(t *testing.T) {
 	}
 	defer e.Stop() //nolint:errcheck
 
-	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPort)
+	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPubPort)
 	u := nitridingSrv + pathRoot
 	// Make sure that the Internet-facing Web server is already running because
 	// we didn't ask nitriding to wait for the application.  The Web server may
@@ -279,7 +260,7 @@ func TestReadyHandler(t *testing.T) {
 	defer e.Stop() //nolint:errcheck
 
 	// Check if the Internet-facing Web server is running.
-	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPort)
+	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPubPort)
 	_, err := http.Get(nitridingSrv + pathRoot)
 	if !errors.Is(err, syscall.ECONNREFUSED) {
 		t.Fatal("Expected 'connection refused'.")
@@ -299,7 +280,7 @@ func TestReadyHandler(t *testing.T) {
 func TestAttestationHandlerWhileProfiling(t *testing.T) {
 	cfg := defaultCfg
 	cfg.UseProfiling = true
-	makeReq := makeRequestFor(createEnclave(&cfg).pubSrv)
+	makeReq := makeRequestFor(createEnclave(&cfg).extPubSrv)
 
 	// Ensure that the attestation handler aborts if profiling is enabled.
 	assertResponse(t,
@@ -309,7 +290,7 @@ func TestAttestationHandlerWhileProfiling(t *testing.T) {
 }
 
 func TestAttestationHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).pubSrv)
+	makeReq := makeRequestFor(createEnclave(&defaultCfg).extPubSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodPost, pathAttestation, nil),
@@ -337,7 +318,7 @@ func TestAttestationHandler(t *testing.T) {
 }
 
 func TestConfigHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).pubSrv)
+	makeReq := makeRequestFor(createEnclave(&defaultCfg).extPubSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathConfig, nil),

@@ -18,7 +18,7 @@ func TestHandlerMetrics(t *testing.T) {
 	// installed.
 	c.PrometheusPort = 80
 	enclave := createEnclave(&c)
-	makeReq := makeRequestFor(enclave.pubSrv)
+	makeReq := makeRequestFor(enclave.extPubSrv)
 
 	// GET /enclave/config
 	assertResponse(t,
