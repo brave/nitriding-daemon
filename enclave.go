@@ -9,7 +9,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -67,15 +66,6 @@ var (
 	errCfgMissingFQDN = errors.New("given config is missing FQDN")
 	errCfgMissingPort = errors.New("given config is missing port")
 )
-
-// hashAndB64 returns the Base64-encoded hash over our key material.  The
-// resulting string is not confidential as it's impractical to reverse the key
-// material.
-func (e *enclaveKeys) hashAndB64() string {
-	keys := append(append(e.NitridingCert, e.NitridingKey...), e.AppKeys...)
-	hash := sha256.Sum256(keys)
-	return base64.StdEncoding.EncodeToString(hash[:])
-}
 
 // Enclave represents a service running inside an AWS Nitro Enclave.
 type Enclave struct {
@@ -377,8 +367,9 @@ func (e *Enclave) Start() error {
 		})
 		if err != nil && !errors.Is(err, errBecameLeader) {
 			elog.Fatalf("Error syncing with leader: %v", err)
+		} else if err == nil {
+			go e.heartbeat()
 		}
-		go e.heartbeat()
 	}
 
 	return nil
@@ -393,20 +384,21 @@ func (e *Enclave) getLeader(path string) *url.URL {
 }
 
 func (e *Enclave) heartbeat() {
+	elog.Println("Starting heartbeat loop.")
 	// TODO: Use context to exit loop.
 	timer := time.NewTicker(time.Minute)
 	for range timer.C {
-		b64Hashes := base64.StdEncoding.EncodeToString(e.hashes.Serialize())
 		_, err := newUnauthenticatedHTTPClient().Post(
 			e.getLeader(pathHeartbeat).String(),
 			"text/plain",
-			strings.NewReader(b64Hashes),
+			strings.NewReader(e.keys.hashAndB64()),
 		)
 		if err != nil {
 			// TODO: what should we do if the leader is dead?
 			elog.Printf("Error sending heartbeat to leader: %v", err)
+		} else {
+			elog.Println("Successfully sent heartbeat to leader.")
 		}
-		elog.Println("Sent heartbeat to leader.")
 	}
 }
 

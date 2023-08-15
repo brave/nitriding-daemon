@@ -248,8 +248,8 @@ func heartbeatHandler(e *Enclave) http.HandlerFunc {
 			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
 			return
 		}
-		theirB64Hashes := string(body)
-		ourB64Hashes := base64.StdEncoding.EncodeToString(e.hashes.Serialize())
+		theirB64Hash := string(body)
+		ourB64Hash := e.keys.hashAndB64()
 
 		// Take note of the worker still being alive.
 		worker, err := e.httpClientToSyncURL(r)
@@ -260,7 +260,7 @@ func heartbeatHandler(e *Enclave) http.HandlerFunc {
 		e.workers.updateAndPrune(worker)
 
 		// Is the worker's key material outdated?  If so, re-synchronize.
-		if ourB64Hashes != theirB64Hashes {
+		if ourB64Hash != theirB64Hash {
 			elog.Println("Worker's keys are outdated.  Re-synchronizing.")
 			go func() {
 				worker, err := e.httpClientToSyncURL(r)

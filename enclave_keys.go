@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"sync"
 )
 
@@ -69,4 +71,13 @@ func (e *enclaveKeys) getAppKeys() []byte {
 	defer e.RUnlock()
 
 	return e.AppKeys
+}
+
+// hashAndB64 returns the Base64-encoded hash over our key material.  The
+// resulting string is not confidential as it's impractical to reverse the key
+// material.
+func (e *enclaveKeys) hashAndB64() string {
+	keys := append(append(e.NitridingCert, e.NitridingKey...), e.AppKeys...)
+	hash := sha256.Sum256(keys)
+	return base64.StdEncoding.EncodeToString(hash[:])
 }
