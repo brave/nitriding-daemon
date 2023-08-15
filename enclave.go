@@ -21,6 +21,7 @@ import (
 	"net/http/httputil"
 	_ "net/http/pprof"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,8 +91,8 @@ type Enclave struct {
 	metrics                   *metrics
 	workers                   *workers
 	keys                      *enclaveKeys
-	ready, stop, becameLeader chan struct{}
 	httpsCert                 *certRetriever
+	ready, stop, becameLeader chan struct{}
 }
 
 // Config represents the configuration of our enclave service.
@@ -295,7 +296,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	// Register external but private HTTP API.
 	m = e.extPrivSrv.Handler.(*chi.Mux)
 	m.Get(pathLeader, leaderHandler(e))
-	m.Get(pathHeartbeat, heartbeatHandler(e))
+	m.Post(pathHeartbeat, heartbeatHandler(e))
 	m.Handle(pathSync, asWorker(e.installKeys, e.becameLeader))
 
 	// Register enclave-internal HTTP API.
@@ -369,16 +370,44 @@ func (e *Enclave) Start() error {
 	}
 
 	if e.cfg.isScalingEnabled() {
-		if err := asWorker(e.installKeys, e.becameLeader).registerWith(&url.URL{
+		err := asWorker(e.installKeys, e.becameLeader).registerWith(&url.URL{
 			Scheme: "https",
 			Host:   fmt.Sprintf("%s:%d", e.cfg.FQDNLeader, e.cfg.ExtPrivPort),
 			Path:   pathRegistration,
-		}); err != nil {
+		})
+		if err != nil && !errors.Is(err, errBecameLeader) {
 			elog.Fatalf("Error syncing with leader: %v", err)
 		}
+		go e.heartbeat()
 	}
 
 	return nil
+}
+
+func (e *Enclave) getLeader(path string) *url.URL {
+	return &url.URL{
+		Scheme: "https",
+		Host:   fmt.Sprintf("%s:%d", e.cfg.FQDNLeader, e.cfg.ExtPrivPort),
+		Path:   path,
+	}
+}
+
+func (e *Enclave) heartbeat() {
+	// TODO: Use context to exit loop.
+	timer := time.NewTicker(time.Minute)
+	for range timer.C {
+		b64Hashes := base64.StdEncoding.EncodeToString(e.hashes.Serialize())
+		_, err := newUnauthenticatedHTTPClient().Post(
+			e.getLeader(pathHeartbeat).String(),
+			"text/plain",
+			strings.NewReader(b64Hashes),
+		)
+		if err != nil {
+			// TODO: what should we do if the leader is dead?
+			elog.Printf("Error sending heartbeat to leader: %v", err)
+		}
+		elog.Println("Sent heartbeat to leader.")
+	}
 }
 
 // Stop stops the enclave.

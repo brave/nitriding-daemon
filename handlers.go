@@ -18,6 +18,8 @@ const (
 	// The maximum length of the key material (in bytes) that enclave
 	// applications can PUT to our HTTP API.
 	maxKeyMaterialLen = 1024 * 1024
+	// The maximum length (in bytes) of the hash over our enclave keys.
+	maxEnclaveKeyHash = 128
 	// The HTML for the enclave's index page.
 	indexPage = "This host runs inside an AWS Nitro Enclave.\n"
 )
@@ -240,8 +242,14 @@ func workerRegistrationHandler(e *Enclave) http.HandlerFunc {
 
 func heartbeatHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Use AttestationHashes instead.
-		fmt.Fprintln(w, e.keys.hashAndB64())
+		// Read the worker's hashed key material.
+		body, err := io.ReadAll(newLimitReader(r.Body, maxEnclaveKeyHash))
+		if err != nil {
+			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
+			return
+		}
+		theirB64Hashes := string(body)
+		ourB64Hashes := base64.StdEncoding.EncodeToString(e.hashes.Serialize())
 
 		// Take note of the worker still being alive.
 		worker, err := e.httpClientToSyncURL(r)
@@ -250,5 +258,21 @@ func heartbeatHandler(e *Enclave) http.HandlerFunc {
 			return
 		}
 		e.workers.updateAndPrune(worker)
+
+		// Is the worker's key material outdated?  If so, re-synchronize.
+		if ourB64Hashes != theirB64Hashes {
+			elog.Println("Worker's keys are outdated.  Re-synchronizing.")
+			go func() {
+				worker, err := e.httpClientToSyncURL(r)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
+					elog.Printf("Error syncing with worker: %v", err)
+					return
+				}
+				elog.Println("Successfully re-synchronized with worker.")
+			}()
+		}
 	}
 }
