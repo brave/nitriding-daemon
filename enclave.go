@@ -218,7 +218,7 @@ func (c *Config) String() string {
 }
 
 // NewEnclave creates and returns a new enclave with the given config.
-func NewEnclave(cfg *Config) (*Enclave, error) {
+func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("failed to create enclave: %w", err)
 	}
@@ -252,6 +252,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		ready:        make(chan struct{}),
 		becameLeader: make(chan struct{}),
 	}
+	go e.workers.monitor(ctx)
 
 	// Increase the maximum number of idle connections per host.  This is
 	// critical to boosting the requests per second that our reverse proxy can
@@ -286,7 +287,6 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	// Register external but private HTTP API.
 	m = e.extPrivSrv.Handler.(*chi.Mux)
 	m.Get(pathLeader, leaderHandler(e))
-	m.Post(pathHeartbeat, heartbeatHandler(e))
 	m.Handle(pathSync, asWorker(e.installKeys, e.becameLeader))
 
 	// Register enclave-internal HTTP API.
@@ -388,17 +388,21 @@ func (e *Enclave) heartbeat() {
 	// TODO: Use context to exit loop.
 	timer := time.NewTicker(time.Minute)
 	for range timer.C {
-		_, err := newUnauthenticatedHTTPClient().Post(
+		resp, err := newUnauthenticatedHTTPClient().Post(
 			e.getLeader(pathHeartbeat).String(),
 			"text/plain",
 			strings.NewReader(e.keys.hashAndB64()),
 		)
+		// TODO: what should we do if the leader is dead?
 		if err != nil {
-			// TODO: what should we do if the leader is dead?
 			elog.Printf("Error sending heartbeat to leader: %v", err)
-		} else {
-			elog.Println("Successfully sent heartbeat to leader.")
+			continue
 		}
+		if resp.StatusCode != http.StatusOK {
+			elog.Printf("Leader responded to heartbeat with status code %d.", resp.StatusCode)
+			continue
+		}
+		elog.Println("Successfully sent heartbeat to leader.")
 	}
 }
 

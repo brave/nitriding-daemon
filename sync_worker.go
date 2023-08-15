@@ -206,5 +206,5 @@ func (s *workerSync) finishSync(w http.ResponseWriter, r *http.Request) {
 	}
 	s.installKeys(&keys)
 
-	elog.Println("Successfully synced with leader.")
+	elog.Printf("Successfully synced keys %s with leader.", keys.hashAndB64())
 }

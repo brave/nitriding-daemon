@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"io"
@@ -130,7 +131,8 @@ func main() {
 		c.AppWebSrv = u
 	}
 
-	enclave, err := NewEnclave(c)
+	ctx := context.Background()
+	enclave, err := NewEnclave(ctx, c)
 	if err != nil {
 		elog.Fatalf("Failed to create enclave: %v", err)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
@@ -139,7 +140,7 @@ func TestProxyHandler(t *testing.T) {
 
 	c := defaultCfg
 	c.AppWebSrv = u
-	e, err := NewEnclave(&c)
+	e, err := NewEnclave(context.Background(), &c)
 	if err != nil {
 		t.Fatal(err)
 	}

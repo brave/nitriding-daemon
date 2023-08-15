@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 )
 
@@ -25,7 +26,7 @@ func assertEqual(t *testing.T, is, should interface{}) {
 }
 
 func createEnclave(cfg *Config) *Enclave {
-	e, err := NewEnclave(cfg)
+	e, err := NewEnclave(context.Background(), cfg)
 	if err != nil {
 		panic(err)
 	}

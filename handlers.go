@@ -214,8 +214,9 @@ func leaderHandler(e *Enclave) http.HandlerFunc {
 		elog.Println("Designated enclave as leader.")
 		close(e.becameLeader) // Signal to other parts of the code.
 
+		e.extPrivSrv.Handler.(*chi.Mux).Post(pathHeartbeat, heartbeatHandler(e))
 		e.extPrivSrv.Handler.(*chi.Mux).Post(pathRegistration, workerRegistrationHandler(e))
-		elog.Println("Set up worker registration endpoint.")
+		elog.Println("Set up worker registration and heartbeat endpoint.")
 
 		w.WriteHeader(http.StatusOK)
 	}
@@ -261,7 +262,7 @@ func heartbeatHandler(e *Enclave) http.HandlerFunc {
 
 		// Is the worker's key material outdated?  If so, re-synchronize.
 		if ourB64Hash != theirB64Hash {
-			elog.Println("Worker's keys are outdated.  Re-synchronizing.")
+			elog.Printf("Worker's keys are outdated (ours=%s, theirs=%s).", ourB64Hash, theirB64Hash)
 			go func() {
 				worker, err := e.httpClientToSyncURL(r)
 				if err != nil {

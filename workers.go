@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/url"
 	"sync"
 	"time"
@@ -26,6 +27,20 @@ func (w *workers) length() int {
 	defer w.RUnlock()
 
 	return len(w.set)
+}
+
+func (w *workers) monitor(ctx context.Context) {
+	elog.Println("Monitoring for defunct enclave workers.")
+	timer := time.NewTicker(time.Minute)
+	for {
+		select {
+		case <-timer.C:
+			w.pruneDefunctWorkers()
+		case <-ctx.Done():
+			elog.Println("Stopping worker monitoring.")
+			return
+		}
+	}
 }
 
 func (w *workers) register(worker *url.URL) {
@@ -67,9 +82,14 @@ func (w *workers) pruneDefunctWorkers() {
 	defer w.RUnlock()
 
 	now := time.Now()
+	pruned := 0
 	for worker, lastSeen := range w.set {
 		if now.Sub(lastSeen) > w.timeout {
 			w.unregister(&worker)
+			pruned += 1
 		}
+	}
+	if pruned > 0 {
+		elog.Printf("Pruned %d worker(s) from worker set.", pruned)
 	}
 }
