@@ -23,7 +23,7 @@ var (
 
 // runNetworking calls the function that sets up our networking environment.
 // If anything fails, we try again after a brief wait period.
-func runNetworking(c *Config, stop chan bool) {
+func runNetworking(c *Config, stop chan struct{}) {
 	var err error
 	for {
 		if err = setupNetworking(c, stop); err == nil {
@@ -42,9 +42,9 @@ func runNetworking(c *Config, stop chan bool) {
 //  3. Establish a connection with the proxy running on the host.
 //  4. Spawn goroutines to forward traffic between the TAP device and the proxy
 //     running on the host.
-func setupNetworking(c *Config, stop chan bool) error {
 	elog.Println("Setting up networking between host and enclave.")
 	defer elog.Println("Tearing down networking between host and enclave.")
+func setupNetworking(c *Config, stop chan struct{}) error {
 
 	// Establish connection with the proxy running on the EC2 host.
 	endpoint := fmt.Sprintf("vsock://%d:%d/connect", parentCID, c.HostProxyPort)
