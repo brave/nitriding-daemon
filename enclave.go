@@ -226,7 +226,7 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 
 	reg := prometheus.NewRegistry()
 	e := &Enclave{
-		attester: &dummyAttester{},
+		attester: &nitroAttester{},
 		ctx:      ctx,
 		cfg:      cfg,
 		extPubSrv: &http.Server{
@@ -263,6 +263,7 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 	http.DefaultTransport.(*http.Transport).MaxIdleConns = 500
 
 	if cfg.Debug {
+		e.attester = &dummyAttester{}
 		e.extPubSrv.Handler.(*chi.Mux).Use(middleware.Logger)
 		e.extPrivSrv.Handler.(*chi.Mux).Use(middleware.Logger)
 		e.intSrv.Handler.(*chi.Mux).Use(middleware.Logger)
@@ -374,14 +375,10 @@ func (e *Enclave) Start(ctx context.Context) error {
 	return nil
 }
 
-func (e *Enclave) getLeader(path string) *url.URL {
-	return &url.URL{
-		Scheme: "https",
-		Host:   fmt.Sprintf("%s:%d", e.cfg.FQDNLeader, e.cfg.ExtPrivPort),
-		Path:   path,
-	}
-}
-
+// workerHeartbeat periodically talks to the leader enclave to 1) let the leader
+// know that we're still alive, and 2) to compare key material.  If it turns out
+// that the leader has different key material than the worker, the worker
+// re-registers itself, which triggers key re-synchronization.
 func (e *Enclave) workerHeartbeat(ctx context.Context) {
 	elog.Println("Starting worker's heartbeat loop.")
 	defer elog.Println("Exiting worker's heartbeat loop.")
@@ -396,7 +393,7 @@ func (e *Enclave) workerHeartbeat(ctx context.Context) {
 			return
 		case <-timer.C:
 			resp, err := newUnauthenticatedHTTPClient().Post(
-				e.getLeader(pathHeartbeat).String(),
+				leader.String(),
 				"text/plain",
 				strings.NewReader(e.keys.hashAndB64()),
 			)
@@ -404,12 +401,13 @@ func (e *Enclave) workerHeartbeat(ctx context.Context) {
 				elog.Printf("Error posting heartbeat to leader: %v", err)
 				continue
 			}
-			// Our key material is outdated.  Asking for re-synchronization.
 			if resp.StatusCode == http.StatusConflict {
+				elog.Println("Our keys are outdated.  Re-synchronizing.")
 				err := asWorker(e.installKeys, e.becameLeader).registerWith(leader)
 				if err != nil && !errors.Is(err, errBecameLeader) {
 					elog.Fatalf("Error syncing with leader: %v", err)
 				}
+				elog.Println("Successfully re-synchronized with leader.")
 				continue
 			}
 			if resp.StatusCode != http.StatusOK {
@@ -651,7 +649,17 @@ func (e *Enclave) setCertFingerprint(rawData []byte) error {
 	return nil
 }
 
-func (e *Enclave) httpClientToSyncURL(r *http.Request) (*url.URL, error) {
+// getLeader returns the leader enclave's URL.
+func (e *Enclave) getLeader(path string) *url.URL {
+	return &url.URL{
+		Scheme: "https",
+		Host:   fmt.Sprintf("%s:%d", e.cfg.FQDNLeader, e.cfg.ExtPrivPort),
+		Path:   path,
+	}
+}
+
+// getWorker returns the worker enclave's URL from the given HTTP request.
+func (e *Enclave) getWorker(r *http.Request) (*url.URL, error) {
 	// Go's HTTP server sets RemoteAddr to IP:port:
 	// https://pkg.go.dev/net/http#Request
 	strIP, _, err := net.SplitHostPort(r.RemoteAddr)

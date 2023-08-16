@@ -57,8 +57,10 @@ func (*dummyAttester) createAttstn(aux auxInfo) ([]byte, error) {
 }
 
 func (*dummyAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
-	var w workerAuxInfo
-	var l leaderAuxInfo
+	var (
+		w workerAuxInfo
+		l leaderAuxInfo
+	)
 
 	// First, assume we're dealing with a worker's auxiliary information.
 	if err := json.Unmarshal(doc, &w); err != nil {
@@ -66,10 +68,8 @@ func (*dummyAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 	}
 	if len(w.WorkersNonce) == nonceLen && len(w.LeadersNonce) == nonceLen && w.PublicKey != nil {
 		if n.B64() != w.LeadersNonce.B64() {
-			fmt.Printf("'%s' / '%s'", n.B64(), w.LeadersNonce.B64())
 			return nil, errors.New("leader nonce not in cache")
 		}
-		elog.Println(w)
 		return &w, nil
 	}
 
@@ -81,7 +81,6 @@ func (*dummyAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 		if n.B64() != l.WorkersNonce.B64() {
 			return nil, errors.New("worker nonce not in cache")
 		}
-		elog.Println(l)
 		return &l, nil
 	}
 

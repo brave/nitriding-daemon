@@ -210,6 +210,12 @@ func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.Handl
 	}
 }
 
+// leaderHandler is called when the enclave is designated as leader enclave.
+// If designated, we do the following:
+//
+//  1. Signal to other parts of the code that we became the leader.
+//  2. Start the worker event loop, to keep track of worker enclaves.
+//  3. Expose leader-specific endpoints.
 func leaderHandler(ctx context.Context, e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		elog.Println("Designated enclave as leader.")
@@ -226,9 +232,12 @@ func leaderHandler(ctx context.Context, e *Enclave) http.HandlerFunc {
 	}
 }
 
+// workerRegistrationHandler allows worker to register themselves with the
+// leader.  Once a worker registered itself, the leader immediately proceeds to
+// synchronize its key material with the worker.
 func workerRegistrationHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		worker, err := e.httpClientToSyncURL(r)
+		worker, err := e.getWorker(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
@@ -240,7 +249,7 @@ func workerRegistrationHandler(e *Enclave) http.HandlerFunc {
 				return
 			}
 			e.workers.register(worker)
-			elog.Printf("Successfully registered and synced with worker %s.", worker.String())
+			elog.Printf("Successfully registered and synced with worker %s.", worker.Host)
 		}()
 	}
 }
@@ -262,7 +271,7 @@ func heartbeatHandler(e *Enclave) http.HandlerFunc {
 		ourKeysHash := e.keys.hashAndB64()
 
 		// Update the worker's "last seen" timestamp.
-		worker, err := e.httpClientToSyncURL(r)
+		worker, err := e.getWorker(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -277,21 +286,5 @@ func heartbeatHandler(e *Enclave) http.HandlerFunc {
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
-
-		// Is the worker's key material outdated?  If so, re-synchronize.
-		// if ourKeysHash != theirKeysHash {
-		// 	go func() {
-		// 		worker, err := e.httpClientToSyncURL(r)
-		// 		if err != nil {
-		// 			// TODO: The client should actively re-register and
-		// 			// terminate if synchronization does not succeed.
-		// 		}
-		// 		if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
-		// 			elog.Printf("Error syncing with worker: %v", err)
-		// 			return
-		// 		}
-		// 		elog.Println("Successfully re-synchronized with worker.")
-		// 	}()
-		// }
 	}
 }

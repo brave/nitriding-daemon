@@ -72,7 +72,7 @@ func main() {
 	flag.BoolVar(&waitForApp, "wait-for-app", false,
 		"Start Internet-facing Web server only after application signals its readiness.")
 	flag.BoolVar(&debug, "debug", false,
-		"Print debug messages.")
+		"Print extra debug messages and use dummy attester for testing outside enclaves.")
 	flag.StringVar(&mockCertFp, "mock-cert-fp", "",
 		"Mock certificate fingerprint to use in attestation documents (hexadecimal)")
 	flag.Parse()
