@@ -34,7 +34,6 @@ import (
 )
 
 // TODO: Support Let's Encrypt (if we choose to).
-// TODO: Handle the case of the leader restarting.  Workers must not break.
 
 const (
 	acmeCertCacheDir    = "cert-cache"
@@ -45,18 +44,17 @@ const (
 	// https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-concepts.html
 	parentCID = 3
 	// The following paths are handled by nitriding.
-	pathRoot         = "/enclave"
-	pathNonce        = "/enclave/nonce"
-	pathAttestation  = "/enclave/attestation"
-	pathState        = "/enclave/state"
-	pathSync         = "/enclave/sync"
-	pathHash         = "/enclave/hash"
-	pathReady        = "/enclave/ready"
-	pathProfiling    = "/enclave/debug"
-	pathConfig       = "/enclave/config"
-	pathLeader       = "/enclave/leader"
-	pathRegistration = "/enclave/registration"
-	pathHeartbeat    = "/enclave/heartbeat"
+	pathRoot        = "/enclave"
+	pathNonce       = "/enclave/nonce"
+	pathAttestation = "/enclave/attestation"
+	pathState       = "/enclave/state"
+	pathSync        = "/enclave/sync"
+	pathHash        = "/enclave/hash"
+	pathReady       = "/enclave/ready"
+	pathProfiling   = "/enclave/debug"
+	pathConfig      = "/enclave/config"
+	pathLeader      = "/enclave/leader"
+	pathHeartbeat   = "/enclave/heartbeat"
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
@@ -331,7 +329,7 @@ func (e *Enclave) installKeys(keys *enclaveKeys) error {
 func (e *Enclave) Start(ctx context.Context) error {
 	var (
 		err    error
-		leader = e.getLeader(pathRegistration)
+		leader = e.getLeader(pathHeartbeat)
 	)
 	errPrefix := "failed to start Nitro Enclave"
 
@@ -383,9 +381,8 @@ func (e *Enclave) workerHeartbeat(ctx context.Context) {
 	elog.Println("Starting worker's heartbeat loop.")
 	defer elog.Println("Exiting worker's heartbeat loop.")
 	var (
-		leaderHeartbeat    = e.getLeader(pathHeartbeat)
-		leaderRegistration = e.getLeader(pathRegistration)
-		timer              = time.NewTicker(time.Minute)
+		leader = e.getLeader(pathHeartbeat)
+		timer  = time.NewTicker(time.Minute)
 	)
 
 	for {
@@ -394,7 +391,7 @@ func (e *Enclave) workerHeartbeat(ctx context.Context) {
 			return
 		case <-timer.C:
 			resp, err := newUnauthenticatedHTTPClient().Post(
-				leaderHeartbeat.String(),
+				leader.String(),
 				"text/plain",
 				strings.NewReader(e.keys.hashAndB64()),
 			)
@@ -404,7 +401,7 @@ func (e *Enclave) workerHeartbeat(ctx context.Context) {
 			}
 			if resp.StatusCode == http.StatusConflict {
 				elog.Println("Our keys are outdated.  Re-synchronizing.")
-				err := asWorker(e.installKeys, e.becameLeader).registerWith(leaderRegistration)
+				err := asWorker(e.installKeys, e.becameLeader).registerWith(leader)
 				if err != nil && !errors.Is(err, errBecameLeader) {
 					elog.Fatalf("Error syncing with leader: %v", err)
 				}

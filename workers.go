@@ -9,11 +9,11 @@ import (
 
 // workerManager manages worker enclaves.
 type workerManager struct {
-	timeout               time.Duration
-	reg, unreg, heartbeat chan *url.URL
-	len                   chan int
-	forAllFunc            chan func(*url.URL)
-	afterTickFunc         chan func()
+	timeout       time.Duration
+	reg, unreg    chan *url.URL
+	len           chan int
+	forAllFunc    chan func(*url.URL)
+	afterTickFunc chan func()
 }
 
 // workers maps worker enclaves to a timestamp that keeps track of when we last
@@ -25,7 +25,6 @@ func newWorkerManager(timeout time.Duration) *workerManager {
 		timeout:       timeout,
 		reg:           make(chan *url.URL),
 		unreg:         make(chan *url.URL),
-		heartbeat:     make(chan *url.URL),
 		len:           make(chan int),
 		forAllFunc:    make(chan func(*url.URL)),
 		afterTickFunc: make(chan func()),
@@ -63,14 +62,6 @@ func (w *workerManager) start(ctx context.Context) {
 			delete(set, *worker)
 			elog.Printf("Unregistered worker %s; %d worker(s) left.",
 				worker.Host, len(set))
-
-		case worker := <-w.heartbeat:
-			_, exists := set[*worker]
-			if !exists {
-				elog.Printf("Updating heartbeat for previously-unregistered worker %s.",
-					worker.Host)
-			}
-			set[*worker] = time.Now()
 
 		case f := <-w.forAllFunc:
 			w.runForAll(f, set)
@@ -126,11 +117,6 @@ func (w *workerManager) register(worker *url.URL) {
 // unregister unregisters the given worker enclave.
 func (w *workerManager) unregister(worker *url.URL) {
 	w.unreg <- worker
-}
-
-// updateHeartbeat updates the "last seen" timestamp of the given worker.
-func (w *workerManager) updateHeartbeat(worker *url.URL) {
-	w.heartbeat <- worker
 }
 
 // pruneDefunctWorkers looks for and unregisters workers whose last heartbeat is

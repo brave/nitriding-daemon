@@ -94,16 +94,13 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 		// The leader's application keys have changed.  Re-synchronize the key
 		// material with all registered workers.  If synchronization fails for a
 		// given worker, unregister it.
-		elog.Printf("Application keys have changed.  Re-synchronizing with %d workers.",
+		elog.Printf("Application keys have changed.  Re-synchronizing with %d worker(s).",
 			e.workers.length())
 		go e.workers.forAll(
 			func(worker *url.URL) {
 				if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
 					// TODO: Log in Prometheus.
-					elog.Printf("Error re-syncing with worker %s: %v", worker.String(), err)
 					e.workers.unregister(worker)
-				} else {
-					elog.Printf("Successfully re-synced with worker %s.", worker.String())
 				}
 			},
 		)
@@ -228,66 +225,43 @@ func leaderHandler(ctx context.Context, e *Enclave) http.HandlerFunc {
 		// Make leader-specific endpoints available.
 		e.intSrv.Handler.(*chi.Mux).Put(pathState, putStateHandler(e))
 		e.extPrivSrv.Handler.(*chi.Mux).Post(pathHeartbeat, heartbeatHandler(e))
-		e.extPrivSrv.Handler.(*chi.Mux).Post(pathRegistration, workerRegistrationHandler(e))
 		elog.Println("Set up worker registration and heartbeat endpoint.")
 
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
-// workerRegistrationHandler allows worker to register themselves with the
-// leader.  Once a worker registered itself, the leader immediately proceeds to
-// synchronize its key material with the worker.
-func workerRegistrationHandler(e *Enclave) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		worker, err := e.getWorker(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-		w.WriteHeader(http.StatusOK)
-
-		go func() {
-			if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
-				elog.Printf("Error syncing with worker: %v", err)
-				return
-			}
-			e.workers.register(worker)
-			elog.Printf("Successfully registered and synced with worker %s.", worker.Host)
-		}()
-	}
-}
-
-// heartbeatHandler exposes an endpoint that allows worker enclaves to send
-// periodic heartbeats to the leader enclave.  The heartbeat's body contains the
-// worker's hashed key material.  If the worker's hash is different from the
-// leader's hash, the leader knows that the worker's key material is out of
-// sync, which makes the leader re-synchronize its key material with the worker.
 func heartbeatHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Read the worker's hashed key material.
 		body, err := io.ReadAll(newLimitReader(r.Body, maxEnclaveKeyHash))
 		if err != nil {
 			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
 			return
 		}
-		theirKeysHash := string(body)
-		ourKeysHash := e.keys.hashAndB64()
-
-		// Update the worker's "last seen" timestamp.
 		worker, err := e.getWorker(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		e.workers.updateHeartbeat(worker)
 
-		// Let the worker know if their keys are outdated.
-		if ourKeysHash != theirKeysHash {
-			elog.Printf("Worker's keys are outdated (ours=%s, theirs=%s).",
-				ourKeysHash, theirKeysHash)
-			w.WriteHeader(http.StatusConflict)
-		} else {
-			w.WriteHeader(http.StatusOK)
+		syncAndRegister := func(keys *enclaveKeys, worker *url.URL) {
+			if err := asLeader(keys.get()).syncWith(worker); err == nil {
+				e.workers.register(worker)
+			}
 		}
+
+		if len(body) == 0 {
+			elog.Printf("Got heartbeat from uninitialized worker %s.", worker.Host)
+			go syncAndRegister(e.keys, worker)
+		} else {
+			elog.Printf("Got heartbeat from initialized worker %s.", worker.Host)
+			ourKeysHash, theirKeysHash := e.keys.hashAndB64(), string(body)
+			if ourKeysHash != theirKeysHash {
+				go syncAndRegister(e.keys, worker)
+			} else {
+				e.workers.register(worker)
+			}
+		}
+		w.WriteHeader(http.StatusOK)
 	}
 }
