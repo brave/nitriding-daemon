@@ -204,7 +204,10 @@ func (s *workerSync) finishSync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.installKeys(&keys)
+	if err := s.installKeys(&keys); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		elog.Fatalf("Failed to install enclave keys: %v", err)
+	}
 
 	elog.Printf("Successfully synced keys %s with leader.", keys.hashAndB64())
 }
