@@ -9,10 +9,10 @@ import (
 
 func TestWorkerRegistration(t *testing.T) {
 	var (
-		w           = newWorkers(time.Minute)
+		w           = newWorkerManager(time.Minute)
 		ctx, cancel = context.WithCancel(context.Background())
 	)
-	go w.monitor(ctx)
+	go w.start(ctx)
 	defer cancel()
 
 	// Identical URLs are only tracked once.
@@ -27,6 +27,8 @@ func TestWorkerRegistration(t *testing.T) {
 
 	w.unregister(&worker1)
 	w.unregister(&worker2)
+	// It should be safe to unregister a non-existing worker.
+	w.unregister(&worker2)
 	assertEqual(t, w.length(), 0)
 
 	// Nothing should happen when attempting to unregister a non-existing
@@ -36,10 +38,10 @@ func TestWorkerRegistration(t *testing.T) {
 
 func TestForAll(t *testing.T) {
 	var (
-		w           = newWorkers(time.Minute)
+		w           = newWorkerManager(time.Minute)
 		ctx, cancel = context.WithCancel(context.Background())
 	)
-	go w.monitor(ctx)
+	go w.start(ctx)
 	defer cancel()
 
 	w.register(&url.URL{Host: "foo"})
@@ -57,10 +59,10 @@ func TestForAll(t *testing.T) {
 
 func TestIneffectiveForAll(t *testing.T) {
 	var (
-		w           = newWorkers(time.Minute)
+		w           = newWorkerManager(time.Minute)
 		ctx, cancel = context.WithCancel(context.Background())
 	)
-	go w.monitor(ctx)
+	go w.start(ctx)
 	defer cancel()
 
 	// Make sure that forAll finishes for an empty worker set.
@@ -68,5 +70,19 @@ func TestIneffectiveForAll(t *testing.T) {
 }
 
 func TestUpdatingAndPruning(t *testing.T) {
-	// TODO
+	var (
+		w           = newWorkerManager(time.Millisecond)
+		ctx, cancel = context.WithCancel(context.Background())
+	)
+	go w.start(ctx)
+	defer cancel()
+
+	worker := &url.URL{Host: "foo"}
+	w.register(worker)
+	assertEqual(t, w.length(), 1)
+
+	// Make sure that the worker got pruned after the next tick.
+	w._afterTick(func() {
+		assertEqual(t, w.length(), 0)
+	})
 }

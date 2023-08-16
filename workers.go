@@ -2,38 +2,42 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"sync"
 	"time"
 )
 
-type workerSet map[url.URL]time.Time
-
-// workers represents a set of worker enclaves.  The leader enclave keeps track
-// of workers.
-type workers struct {
+// workerManager manages worker enclaves.
+type workerManager struct {
 	timeout               time.Duration
 	reg, unreg, heartbeat chan *url.URL
 	len                   chan int
-	f                     chan func(*url.URL)
+	forAllFunc            chan func(*url.URL)
+	afterTickFunc         chan func()
 }
 
-func newWorkers(timeout time.Duration) *workers {
-	return &workers{
-		timeout:   timeout,
-		reg:       make(chan *url.URL),
-		unreg:     make(chan *url.URL),
-		heartbeat: make(chan *url.URL),
-		len:       make(chan int),
-		f:         make(chan func(*url.URL)),
+// workers maps worker enclaves to a timestamp that keeps track of when we last
+// got a heartbeat from the enclave.
+type workers map[url.URL]time.Time
+
+func newWorkerManager(timeout time.Duration) *workerManager {
+	return &workerManager{
+		timeout:       timeout,
+		reg:           make(chan *url.URL),
+		unreg:         make(chan *url.URL),
+		heartbeat:     make(chan *url.URL),
+		len:           make(chan int),
+		forAllFunc:    make(chan func(*url.URL)),
+		afterTickFunc: make(chan func()),
 	}
 }
 
-func (w *workers) monitor(ctx context.Context) {
+// start starts the worker manager's event loop.
+func (w *workerManager) start(ctx context.Context) {
 	var (
-		set   = make(map[url.URL]time.Time)
-		timer = time.NewTicker(time.Minute)
+		set           = make(workers)
+		timer         = time.NewTicker(w.timeout)
+		afterTickFunc = func() {}
 	)
 	elog.Println("Starting worker event loop.")
 	defer elog.Println("Stopping worker event loop.")
@@ -43,8 +47,12 @@ func (w *workers) monitor(ctx context.Context) {
 		case <-ctx.Done():
 			return
 
+		case f := <-w.afterTickFunc:
+			afterTickFunc = f
+
 		case <-timer.C:
 			go w.pruneDefunctWorkers(set)
+			afterTickFunc()
 
 		case worker := <-w.reg:
 			set[*worker] = time.Now()
@@ -64,9 +72,9 @@ func (w *workers) monitor(ctx context.Context) {
 			}
 			set[*worker] = time.Now()
 
-		case f := <-w.f:
+		case f := <-w.forAllFunc:
 			w.runForAll(f, set)
-			w.f <- nil // Signal to caller that we're done.
+			w.forAllFunc <- nil // Signal to caller that we're done.
 
 		case <-w.len:
 			w.len <- len(set)
@@ -77,42 +85,57 @@ func (w *workers) monitor(ctx context.Context) {
 // runForAll blocks until the given function was run over all workers in our
 // set.  For key synchronization, this should never take more than a couple
 // seconds.
-func (w *workers) runForAll(f func(*url.URL), set workerSet) {
+func (w *workerManager) runForAll(f func(*url.URL), set workers) {
 	var wg sync.WaitGroup
-	fmt.Printf("# of workers: %d", len(set))
 	for worker := range set {
 		wg.Add(1)
-		go func(wg *sync.WaitGroup, worker *url.URL) {
-			f(worker)
+		go func(wg *sync.WaitGroup, worker url.URL) {
+			elog.Printf("Running function for worker %s.", worker.Host)
+			f(&worker)
 			wg.Done()
-		}(&wg, &worker)
+		}(&wg, worker)
 	}
 	wg.Wait()
 }
 
-func (w *workers) length() int {
+// _afterTick runs the given function after the next event loop tick.  This is
+// only useful in unit tests.
+func (w *workerManager) _afterTick(f func()) {
+	w.afterTickFunc <- f
+}
+
+// length returns the number of workers that are currently registered.
+func (w *workerManager) length() int {
 	w.len <- 0 // Signal to the event loop that we want the length.
 	return <-w.len
 }
 
-func (w *workers) forAll(f func(*url.URL)) {
-	w.f <- f
-	<-w.f // Wait until the event loop is done running the given function.
+// forAll runs the given function over all registered workers.  This function
+// blocks until the operation succeeded.
+func (w *workerManager) forAll(f func(*url.URL)) {
+	w.forAllFunc <- f
+	<-w.forAllFunc // Wait until the event loop is done running the given function.
 }
 
-func (w *workers) register(worker *url.URL) {
+// register registers a new worker enclave.  It is safe to repeatedly register
+// the same worker enclave.
+func (w *workerManager) register(worker *url.URL) {
 	w.reg <- worker
 }
 
-func (w *workers) unregister(worker *url.URL) {
+// unregister unregisters the given worker enclave.
+func (w *workerManager) unregister(worker *url.URL) {
 	w.unreg <- worker
 }
 
-func (w *workers) updateHeartbeat(worker *url.URL) {
+// updateHeartbeat updates the "last seen" timestamp of the given worker.
+func (w *workerManager) updateHeartbeat(worker *url.URL) {
 	w.heartbeat <- worker
 }
 
-func (w *workers) pruneDefunctWorkers(set workerSet) {
+// pruneDefunctWorkers looks for and unregisters workers whose last heartbeat is
+// older than our timeout.
+func (w *workerManager) pruneDefunctWorkers(set workers) {
 	now := time.Now()
 	for worker, lastSeen := range set {
 		if now.Sub(lastSeen) > w.timeout {
