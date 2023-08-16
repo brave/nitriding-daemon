@@ -31,7 +31,7 @@ func asLeader(keys *enclaveKeys) *leaderSync {
 // syncWith makes the leader initiate key synchronization with the given worker
 // enclave.
 func (s *leaderSync) syncWith(worker *url.URL) error {
-	elog.Println("Initiating key synchronization with worker.")
+	elog.Printf("Initiating key synchronization with worker %s.", worker.Host)
 
 	// Step 1: Create a nonce that the worker must embed in its attestation
 	// document, to prevent replay attacks.
