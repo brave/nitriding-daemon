@@ -137,7 +137,7 @@ func main() {
 		elog.Fatalf("Failed to create enclave: %v", err)
 	}
 
-	if err := enclave.Start(); err != nil {
+	if err := enclave.Start(ctx); err != nil {
 		elog.Fatalf("Enclave terminated: %v", err)
 	}
 

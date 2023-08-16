@@ -95,9 +95,18 @@ func signalReady(t *testing.T, e *Enclave) {
 }
 
 func TestStateHandlers(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).intSrv)
+	e := createEnclave(&defaultCfg)
+
+	// First, designate the enclave as leader to make the "put state" endpoint
+	// available.
+	makeReq := makeRequestFor(e.extPrivSrv)
+	assertResponse(t,
+		makeReq(http.MethodGet, pathLeader, nil),
+		newResp(http.StatusOK, ""),
+	)
 
 	tooLargeKey := make([]byte, 1024*1024+1)
+	makeReq = makeRequestFor(e.intSrv)
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, bytes.NewReader(tooLargeKey)),
 		newResp(http.StatusInternalServerError, errFailedReqBody.Error()),
@@ -145,7 +154,7 @@ func TestProxyHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.revProxy = httputil.NewSingleHostReverseProxy(u)
-	if err := e.Start(); err != nil {
+	if err := e.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	defer e.Stop() //nolint:errcheck
@@ -219,7 +228,7 @@ func TestReadiness(t *testing.T) {
 	cfg := defaultCfg
 	cfg.WaitForApp = false
 	e := createEnclave(&cfg)
-	if err := e.Start(); err != nil {
+	if err := e.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	defer e.Stop() //nolint:errcheck
@@ -255,7 +264,7 @@ func TestReadyHandler(t *testing.T) {
 	cfg := defaultCfg
 	cfg.WaitForApp = true
 	e := createEnclave(&cfg)
-	if err := e.Start(); err != nil {
+	if err := e.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	defer e.Stop() //nolint:errcheck

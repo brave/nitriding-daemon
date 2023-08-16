@@ -71,6 +71,7 @@ var (
 type Enclave struct {
 	sync.RWMutex
 	attester
+	ctx                       context.Context
 	cfg                       *Config
 	extPubSrv, extPrivSrv     *http.Server
 	intSrv                    *http.Server
@@ -226,6 +227,7 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 	reg := prometheus.NewRegistry()
 	e := &Enclave{
 		attester: &dummyAttester{},
+		ctx:      ctx,
 		cfg:      cfg,
 		extPubSrv: &http.Server{
 			Handler: chi.NewRouter(),
@@ -252,7 +254,6 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 		ready:        make(chan struct{}),
 		becameLeader: make(chan struct{}),
 	}
-	go e.workers.monitor(ctx)
 
 	// Increase the maximum number of idle connections per host.  This is
 	// critical to boosting the requests per second that our reverse proxy can
@@ -286,14 +287,13 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 
 	// Register external but private HTTP API.
 	m = e.extPrivSrv.Handler.(*chi.Mux)
-	m.Get(pathLeader, leaderHandler(e))
+	m.Get(pathLeader, leaderHandler(ctx, e))
 	m.Handle(pathSync, asWorker(e.installKeys, e.becameLeader))
 
 	// Register enclave-internal HTTP API.
 	m = e.intSrv.Handler.(*chi.Mux)
 	m.Get(pathReady, readyHandler(e))
 	m.Get(pathState, getStateHandler(e))
-	m.Put(pathState, putStateHandler(e))
 	m.Post(pathHash, hashHandler(e))
 
 	// Configure our reverse proxy if the enclave application exposes an HTTP
@@ -327,8 +327,11 @@ func (e *Enclave) installKeys(keys *enclaveKeys) error {
 
 // Start starts the Nitro Enclave.  If something goes wrong, the function
 // returns an error.
-func (e *Enclave) Start() error {
-	var err error
+func (e *Enclave) Start(ctx context.Context) error {
+	var (
+		err    error
+		leader = e.getLeader(pathRegistration)
+	)
 	errPrefix := "failed to start Nitro Enclave"
 
 	if inEnclave {
@@ -360,15 +363,11 @@ func (e *Enclave) Start() error {
 	}
 
 	if e.cfg.isScalingEnabled() {
-		err := asWorker(e.installKeys, e.becameLeader).registerWith(&url.URL{
-			Scheme: "https",
-			Host:   fmt.Sprintf("%s:%d", e.cfg.FQDNLeader, e.cfg.ExtPrivPort),
-			Path:   pathRegistration,
-		})
+		err := asWorker(e.installKeys, e.becameLeader).registerWith(leader)
 		if err != nil && !errors.Is(err, errBecameLeader) {
 			elog.Fatalf("Error syncing with leader: %v", err)
 		} else if err == nil {
-			go e.heartbeat()
+			go e.workerHeartbeat(ctx)
 		}
 	}
 
@@ -383,26 +382,42 @@ func (e *Enclave) getLeader(path string) *url.URL {
 	}
 }
 
-func (e *Enclave) heartbeat() {
-	elog.Println("Starting heartbeat loop.")
-	// TODO: Use context to exit loop.
-	timer := time.NewTicker(time.Minute)
-	for range timer.C {
-		resp, err := newUnauthenticatedHTTPClient().Post(
-			e.getLeader(pathHeartbeat).String(),
-			"text/plain",
-			strings.NewReader(e.keys.hashAndB64()),
-		)
-		// TODO: what should we do if the leader is dead?
-		if err != nil {
-			elog.Printf("Error sending heartbeat to leader: %v", err)
-			continue
+func (e *Enclave) workerHeartbeat(ctx context.Context) {
+	elog.Println("Starting worker's heartbeat loop.")
+	defer elog.Println("Exiting worker's heartbeat loop.")
+	var (
+		leader = e.getLeader(pathRegistration)
+		timer  = time.NewTicker(time.Minute)
+	)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			resp, err := newUnauthenticatedHTTPClient().Post(
+				e.getLeader(pathHeartbeat).String(),
+				"text/plain",
+				strings.NewReader(e.keys.hashAndB64()),
+			)
+			if err != nil {
+				elog.Printf("Error posting heartbeat to leader: %v", err)
+				continue
+			}
+			// Our key material is outdated.  Asking for re-synchronization.
+			if resp.StatusCode == http.StatusConflict {
+				err := asWorker(e.installKeys, e.becameLeader).registerWith(leader)
+				if err != nil && !errors.Is(err, errBecameLeader) {
+					elog.Fatalf("Error syncing with leader: %v", err)
+				}
+				continue
+			}
+			if resp.StatusCode != http.StatusOK {
+				elog.Printf("Leader responded to heartbeat with status code %d.", resp.StatusCode)
+				continue
+			}
+			elog.Println("Successfully sent heartbeat to leader.")
 		}
-		if resp.StatusCode != http.StatusOK {
-			elog.Printf("Leader responded to heartbeat with status code %d.", resp.StatusCode)
-			continue
-		}
-		elog.Println("Successfully sent heartbeat to leader.")
 	}
 }
 

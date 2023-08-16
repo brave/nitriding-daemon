@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -93,8 +94,8 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 		// The leader's application keys have changed.  Re-synchronize the key
 		// material with all registered workers.  If synchronization fails for a
 		// given worker, unregister it.
-		for worker := range e.workers.set {
-			go func(worker *url.URL) {
+		e.workers.forAll(
+			func(worker *url.URL) {
 				if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
 					// TODO: Log in Prometheus.
 					elog.Printf("Error re-syncing with worker %s: %v", worker.String(), err)
@@ -102,8 +103,8 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 				} else {
 					elog.Printf("Successfully re-synced with worker %s.", worker.String())
 				}
-			}(&worker)
-		}
+			},
+		)
 	}
 }
 
@@ -209,11 +210,14 @@ func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.Handl
 	}
 }
 
-func leaderHandler(e *Enclave) http.HandlerFunc {
+func leaderHandler(ctx context.Context, e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		elog.Println("Designated enclave as leader.")
 		close(e.becameLeader) // Signal to other parts of the code.
 
+		go e.workers.monitor(ctx)
+		// Make leader-specific endpoints available.
+		e.intSrv.Handler.(*chi.Mux).Put(pathState, putStateHandler(e))
 		e.extPrivSrv.Handler.(*chi.Mux).Post(pathHeartbeat, heartbeatHandler(e))
 		e.extPrivSrv.Handler.(*chi.Mux).Post(pathRegistration, workerRegistrationHandler(e))
 		elog.Println("Set up worker registration and heartbeat endpoint.")
@@ -241,6 +245,11 @@ func workerRegistrationHandler(e *Enclave) http.HandlerFunc {
 	}
 }
 
+// heartbeatHandler exposes an endpoint that allows worker enclaves to send
+// periodic heartbeats to the leader enclave.  The heartbeat's body contains the
+// worker's hashed key material.  If the worker's hash is different from the
+// leader's hash, the leader knows that the worker's key material is out of
+// sync, which makes the leader re-synchronize its key material with the worker.
 func heartbeatHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Read the worker's hashed key material.
@@ -249,31 +258,40 @@ func heartbeatHandler(e *Enclave) http.HandlerFunc {
 			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
 			return
 		}
-		theirB64Hash := string(body)
-		ourB64Hash := e.keys.hashAndB64()
+		theirKeysHash := string(body)
+		ourKeysHash := e.keys.hashAndB64()
 
-		// Take note of the worker still being alive.
+		// Update the worker's "last seen" timestamp.
 		worker, err := e.httpClientToSyncURL(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		e.workers.updateAndPrune(worker)
+		e.workers.updateHeartbeat(worker)
+
+		// Let the worker know if their keys are outdated.
+		if ourKeysHash != theirKeysHash {
+			elog.Printf("Worker's keys are outdated (ours=%s, theirs=%s).",
+				ourKeysHash, theirKeysHash)
+			w.WriteHeader(http.StatusConflict)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
 
 		// Is the worker's key material outdated?  If so, re-synchronize.
-		if ourB64Hash != theirB64Hash {
-			elog.Printf("Worker's keys are outdated (ours=%s, theirs=%s).", ourB64Hash, theirB64Hash)
-			go func() {
-				worker, err := e.httpClientToSyncURL(r)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-				}
-				if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
-					elog.Printf("Error syncing with worker: %v", err)
-					return
-				}
-				elog.Println("Successfully re-synchronized with worker.")
-			}()
-		}
+		// if ourKeysHash != theirKeysHash {
+		// 	go func() {
+		// 		worker, err := e.httpClientToSyncURL(r)
+		// 		if err != nil {
+		// 			// TODO: The client should actively re-register and
+		// 			// terminate if synchronization does not succeed.
+		// 		}
+		// 		if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
+		// 			elog.Printf("Error syncing with worker: %v", err)
+		// 			return
+		// 		}
+		// 		elog.Println("Successfully re-synchronized with worker.")
+		// 	}()
+		// }
 	}
 }
