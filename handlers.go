@@ -96,7 +96,7 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 		// given worker, unregister it.
 		elog.Printf("Application keys have changed.  Re-synchronizing with %d workers.",
 			e.workers.length())
-		e.workers.forAll(
+		go e.workers.forAll(
 			func(worker *url.URL) {
 				if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
 					// TODO: Log in Prometheus.
@@ -222,8 +222,9 @@ func leaderHandler(ctx context.Context, e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		elog.Println("Designated enclave as leader.")
 		close(e.becameLeader) // Signal to other parts of the code.
+		// TODO: Repeated calls make the goroutine panic.
 
-		go e.workers.monitor(ctx)
+		go e.workers.start(ctx)
 		// Make leader-specific endpoints available.
 		e.intSrv.Handler.(*chi.Mux).Put(pathState, putStateHandler(e))
 		e.extPrivSrv.Handler.(*chi.Mux).Post(pathHeartbeat, heartbeatHandler(e))
