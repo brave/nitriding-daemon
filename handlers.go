@@ -94,6 +94,8 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 		// The leader's application keys have changed.  Re-synchronize the key
 		// material with all registered workers.  If synchronization fails for a
 		// given worker, unregister it.
+		elog.Printf("Application keys have changed.  Re-synchronizing with %d workers.",
+			e.workers.length())
 		e.workers.forAll(
 			func(worker *url.URL) {
 				if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
