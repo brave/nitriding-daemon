@@ -331,7 +331,7 @@ func (e *Enclave) installKeys(keys *enclaveKeys) error {
 func (e *Enclave) Start(ctx context.Context) error {
 	var (
 		err    error
-		leader = e.getLeader(pathHeartbeat)
+		leader = e.getLeader(pathRegistration)
 	)
 	errPrefix := "failed to start Nitro Enclave"
 
@@ -383,8 +383,9 @@ func (e *Enclave) workerHeartbeat(ctx context.Context) {
 	elog.Println("Starting worker's heartbeat loop.")
 	defer elog.Println("Exiting worker's heartbeat loop.")
 	var (
-		leader = e.getLeader(pathRegistration)
-		timer  = time.NewTicker(time.Minute)
+		leaderHeartbeat    = e.getLeader(pathHeartbeat)
+		leaderRegistration = e.getLeader(pathRegistration)
+		timer              = time.NewTicker(time.Minute)
 	)
 
 	for {
@@ -393,7 +394,7 @@ func (e *Enclave) workerHeartbeat(ctx context.Context) {
 			return
 		case <-timer.C:
 			resp, err := newUnauthenticatedHTTPClient().Post(
-				leader.String(),
+				leaderHeartbeat.String(),
 				"text/plain",
 				strings.NewReader(e.keys.hashAndB64()),
 			)
@@ -403,7 +404,7 @@ func (e *Enclave) workerHeartbeat(ctx context.Context) {
 			}
 			if resp.StatusCode == http.StatusConflict {
 				elog.Println("Our keys are outdated.  Re-synchronizing.")
-				err := asWorker(e.installKeys, e.becameLeader).registerWith(leader)
+				err := asWorker(e.installKeys, e.becameLeader).registerWith(leaderRegistration)
 				if err != nil && !errors.Is(err, errBecameLeader) {
 					elog.Fatalf("Error syncing with leader: %v", err)
 				}
