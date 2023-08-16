@@ -622,7 +622,7 @@ func (e *Enclave) setCertFingerprint(rawData []byte) error {
 	if e.cfg.MockCertFp != "" {
 		hash, err := hex.DecodeString(e.cfg.MockCertFp)
 		if err != nil {
-			return errors.New("Failed to decode mock certificate fingerprint hex")
+			return errors.New("failed to decode mock certificate fingerprint hex")
 		}
 		copy(e.hashes.tlsKeyHash[:], hash)
 		return nil
