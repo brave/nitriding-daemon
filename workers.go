@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"net/url"
-	"sync"
 	"time"
 )
 
@@ -65,7 +64,6 @@ func (w *workerManager) start(ctx context.Context) {
 
 		case f := <-w.forAllFunc:
 			w.runForAll(f, set)
-			w.forAllFunc <- nil // Signal to caller that we're done.
 
 		case <-w.len:
 			w.len <- len(set)
@@ -73,20 +71,12 @@ func (w *workerManager) start(ctx context.Context) {
 	}
 }
 
-// runForAll blocks until the given function was run over all workers in our
-// set.  For key synchronization, this should never take more than a couple
-// seconds.
+// runForAll runs the given function over all workers in our set.  For key
+// synchronization, this should never take more than a couple seconds.
 func (w *workerManager) runForAll(f func(*url.URL), set workers) {
-	var wg sync.WaitGroup
 	for worker := range set {
-		wg.Add(1)
-		go func(wg *sync.WaitGroup, worker url.URL) {
-			elog.Printf("Running function for worker %s.", worker.Host)
-			f(&worker)
-			wg.Done()
-		}(&wg, worker)
+		go f(&worker)
 	}
-	wg.Wait()
 }
 
 // _afterTick runs the given function after the next event loop tick.  This is
@@ -101,11 +91,9 @@ func (w *workerManager) length() int {
 	return <-w.len
 }
 
-// forAll runs the given function over all registered workers.  This function
-// blocks until the operation succeeded.
+// forAll runs the given function over all registered workers.
 func (w *workerManager) forAll(f func(*url.URL)) {
 	w.forAllFunc <- f
-	<-w.forAllFunc // Wait until the event loop is done running the given function.
 }
 
 // register registers a new worker enclave.  It is safe to repeatedly register

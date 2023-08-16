@@ -54,7 +54,10 @@ func TestForAll(t *testing.T) {
 			total += 1
 		},
 	)
-	assertEqual(t, total, 2)
+	// Make sure that the worker got pruned after the next tick.
+	w._afterTick(func() {
+		assertEqual(t, total, 2)
+	})
 }
 
 func TestIneffectiveForAll(t *testing.T) {
