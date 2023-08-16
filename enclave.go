@@ -2,19 +2,14 @@ package main
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -495,67 +490,23 @@ func (e *Enclave) startWebServers() error {
 	return nil
 }
 
-// genSelfSignedCert creates and returns a self-signed TLS certificate based on
-// the given FQDN.  Some of the code below was taken from:
-// https://eli.thegreenplace.net/2021/go-https-servers-with-tls/
+// genSelfSignedCert creates and installs a self-signed certificate.
 func (e *Enclave) genSelfSignedCert() error {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	cert, key, err := createCertificate(e.cfg.FQDN)
 	if err != nil {
 		return err
 	}
-	elog.Println("Generated private key for self-signed certificate.")
 
-	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err := e.setCertFingerprint(cert); err != nil {
+		return err
+	}
+	e.keys.setNitridingKeys(key, cert)
+
+	tlsCert, err := tls.X509KeyPair(cert, key)
 	if err != nil {
 		return err
 	}
-	elog.Println("Generated serial number for self-signed certificate.")
-
-	template := x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Organization: []string{certificateOrg},
-		},
-		DNSNames:              []string{e.cfg.FQDN},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(certificateValidity),
-		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-	}
-
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
-	if err != nil {
-		return err
-	}
-	elog.Println("Created certificate from template.")
-
-	pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-	if pemCert == nil {
-		return errors.New("failed to encode certificate to PEM")
-	}
-	// Determine and set the certificate's fingerprint because we need to add
-	// the fingerprint to our Nitro attestation document.
-	if err := e.setCertFingerprint(pemCert); err != nil {
-		return err
-	}
-
-	privBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	if err != nil {
-		elog.Fatalf("Unable to marshal private key: %v", err)
-	}
-	pemKey := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
-	if pemKey == nil {
-		elog.Fatal("Failed to encode key to PEM.")
-	}
-	e.keys.setNitridingKeys(pemKey, pemCert)
-
-	cert, err := tls.X509KeyPair(pemCert, pemKey)
-	if err != nil {
-		return err
-	}
-	e.httpsCert.set(&cert)
+	e.httpsCert.set(&tlsCert)
 	e.extPubSrv.TLSConfig = &tls.Config{
 		GetCertificate: e.httpsCert.get,
 	}

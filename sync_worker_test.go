@@ -15,6 +15,15 @@ var leaderKeys = &enclaveKeys{
 	AppKeys:       []byte("AppTestKeys"),
 }
 
+func initLeaderKeysCert(t *testing.T) {
+	t.Helper()
+	cert, key, err := createCertificate("example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaderKeys.setNitridingKeys(key, cert)
+}
+
 func TestSuccessfulRegisterWith(t *testing.T) {
 	e := createEnclave(&defaultCfg)
 	hasRegistered := false
@@ -61,6 +70,10 @@ func TestAbortedRegisterWith(t *testing.T) {
 }
 
 func TestSuccessfulSync(t *testing.T) {
+	// For key synchronization to be successful, we need actual certificates in
+	// the leader keys.
+	initLeaderKeysCert(t)
+
 	// Set up the worker.
 	worker := createEnclave(&defaultCfg)
 	srv := httptest.NewTLSServer(
