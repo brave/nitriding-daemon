@@ -394,15 +394,6 @@ func (e *Enclave) workerHeartbeat(ctx context.Context) {
 				elog.Printf("Error posting heartbeat to leader: %v", err)
 				continue
 			}
-			if resp.StatusCode == http.StatusConflict {
-				elog.Println("Our keys are outdated.  Re-synchronizing.")
-				err := asWorker(e.installKeys, e.becameLeader).registerWith(leader)
-				if err != nil && !errors.Is(err, errBecameLeader) {
-					elog.Fatalf("Error syncing with leader: %v", err)
-				}
-				elog.Println("Successfully re-synchronized with leader.")
-				continue
-			}
 			if resp.StatusCode != http.StatusOK {
 				elog.Printf("Leader responded to heartbeat with status code %d.", resp.StatusCode)
 				continue
