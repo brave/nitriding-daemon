@@ -157,17 +157,41 @@ func (*nitroAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 		return nil, fmt.Errorf("%s: nonce %s not in cache", errStr, b64Nonce)
 	}
 
+	workersNonce, err := sliceToNonce(their.Document.Nonce)
+	if err != nil {
+		return nil, err
+	}
+	leadersNonce, err := sliceToNonce(their.Document.UserData)
+	if err != nil {
+		return nil, err
+	}
 	// If the "public key" field is unset, we know that we're dealing with a
 	// worker's auxiliary information.
 	if their.Document.PublicKey != nil {
 		return &workerAuxInfo{
-			WorkersNonce: nonce(their.Document.Nonce),
-			LeadersNonce: nonce(their.Document.UserData),
+			WorkersNonce: workersNonce,
+			LeadersNonce: leadersNonce,
 			PublicKey:    their.Document.PublicKey,
 		}, nil
 	}
+
+	workersNonce, err = sliceToNonce(their.Document.Nonce)
+	if err != nil {
+		return nil, err
+	}
 	return &leaderAuxInfo{
-		WorkersNonce: nonce(their.Document.Nonce),
+		WorkersNonce: workersNonce,
 		EnclaveKeys:  their.Document.UserData,
 	}, nil
+}
+
+func sliceToNonce(s []byte) (nonce, error) {
+	var n nonce
+
+	if len(s) != nonceLen {
+		return nonce{}, errors.New("slice is not of same length as nonce")
+	}
+
+	copy(n[:], s[:nonceLen])
+	return n, nil
 }
