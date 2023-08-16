@@ -80,7 +80,7 @@ type Enclave struct {
 	hashes                    *AttestationHashes
 	promRegistry              *prometheus.Registry
 	metrics                   *metrics
-	workers                   *workers
+	workers                   *workerManager
 	keys                      *enclaveKeys
 	httpsCert                 *certRetriever
 	ready, stop, becameLeader chan struct{}
@@ -249,7 +249,7 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 		promRegistry: reg,
 		metrics:      newMetrics(reg, cfg.PrometheusNamespace),
 		hashes:       new(AttestationHashes),
-		workers:      newWorkers(time.Minute),
+		workers:      newWorkerManager(time.Minute),
 		stop:         make(chan struct{}),
 		ready:        make(chan struct{}),
 		becameLeader: make(chan struct{}),
