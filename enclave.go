@@ -331,7 +331,7 @@ func (e *Enclave) installKeys(keys *enclaveKeys) error {
 func (e *Enclave) Start(ctx context.Context) error {
 	var (
 		err    error
-		leader = e.getLeader(pathRegistration)
+		leader = e.getLeader(pathHeartbeat)
 	)
 	errPrefix := "failed to start Nitro Enclave"
 
