@@ -501,7 +501,8 @@ func (e *Enclave) genSelfSignedCert() error {
 	e.extPubSrv.TLSConfig = &tls.Config{
 		GetCertificate: e.httpsCert.get,
 	}
-	e.extPrivSrv.TLSConfig = e.extPubSrv.TLSConfig // Both servers share a TLS config.
+	// Both servers share a TLS config.
+	e.extPrivSrv.TLSConfig = e.extPubSrv.TLSConfig.Clone()
 
 	return nil
 }
