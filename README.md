@@ -55,4 +55,5 @@ system, take a look at our [research paper](https://arxiv.org/abs/2206.04123).
 
 * [How to use nitriding](doc/usage.md)
 * [System architecture](doc/architecture.md)
+* [Horizontal scaling](doc/key-synchronization.md)
 * [Example application](example/)
