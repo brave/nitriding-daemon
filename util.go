@@ -41,7 +41,6 @@ var _getSyncURL = func(host string, port uint16) *url.URL {
 // all we need is a *confidential* channel, and not an authenticated channel.
 // Authentication is handled via attestation documents.
 func _newUnauthenticatedHTTPClient() *http.Client {
-	fmt.Println("ORIG CLIENT")
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
