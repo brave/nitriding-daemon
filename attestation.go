@@ -3,12 +3,9 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 
 	"github.com/hf/nitrite"
-	"github.com/hf/nsm"
-	"github.com/hf/nsm/request"
 )
 
 const (
@@ -55,7 +52,7 @@ func (a *AttestationHashes) Serialize() []byte {
 // _getPCRValues returns the enclave's platform configuration register (PCR)
 // values.
 func _getPCRValues() (map[uint][]byte, error) {
-	rawAttDoc, err := attest(nil, nil, nil)
+	rawAttDoc, err := newNitroAttester().createAttstn(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -85,34 +82,4 @@ func arePCRsIdentical(ourPCRs, theirPCRs map[uint][]byte) bool {
 		}
 	}
 	return true
-}
-
-// attest takes as input a nonce, user-provided data and a public key, and then
-// asks the Nitro hypervisor to return a signed attestation document that
-// contains all three values.
-func attest(nonce, userData, publicKey []byte) ([]byte, error) {
-	s, err := nsm.OpenDefaultSession()
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err = s.Close(); err != nil {
-			elog.Printf("Attestation: Failed to close default NSM session: %s", err)
-		}
-	}()
-
-	res, err := s.Send(&request.Attestation{
-		Nonce:     nonce,
-		UserData:  userData,
-		PublicKey: publicKey,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if res.Attestation == nil || res.Attestation.Document == nil {
-		return nil, errors.New("NSM device did not return an attestation")
-	}
-
-	return res.Attestation.Document, nil
 }

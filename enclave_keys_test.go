@@ -5,17 +5,25 @@ import (
 	"testing"
 )
 
-// testKeys holds arbitrary keys that we use for testing.
-var testKeys = &enclaveKeys{
-	NitridingKey:  []byte("NitridingTestKey"),
-	NitridingCert: []byte("NitridingTestCert"),
-	AppKeys:       []byte("AppTestKeys"),
+// newTestKeys returns arbitrary keys that we use for testing.
+func newTestKeys(t *testing.T) *enclaveKeys {
+	t.Helper()
+	var testKeys = &enclaveKeys{
+		AppKeys: []byte("AppTestKeys"),
+	}
+	cert, key, err := createCertificate("example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	testKeys.setNitridingKeys(key, cert)
+	return testKeys
 }
 
 func TestSetKeys(t *testing.T) {
 	var (
-		keys    enclaveKeys
-		appKeys = []byte("AppKeys")
+		keys     enclaveKeys
+		appKeys  = []byte("AppKeys")
+		testKeys = newTestKeys(t)
 	)
 
 	// Ensure that the application keys are set correctly.
@@ -45,8 +53,9 @@ func TestSetKeys(t *testing.T) {
 
 func TestGetKeys(t *testing.T) {
 	var (
-		appKeys = testKeys.getAppKeys()
-		keys    = testKeys.get()
+		testKeys = newTestKeys(t)
+		appKeys  = testKeys.getAppKeys()
+		keys     = testKeys.get()
 	)
 
 	// Ensure that the application key is retrieved correctly.
@@ -61,12 +70,15 @@ func TestGetKeys(t *testing.T) {
 }
 
 func TestModifyCloneObject(t *testing.T) {
-	newKeys := testKeys.get()
-	newKeys.setAppKeys([]byte("foobar"))
+	var (
+		keys       = newTestKeys(t)
+		clonedKeys = keys.get()
+	)
 
 	// Make sure that setting the clone's application keys does not affect the
 	// original object.
-	if bytes.Equal(newKeys.getAppKeys(), testKeys.getAppKeys()) {
+	keys.setAppKeys([]byte("foobar"))
+	if bytes.Equal(keys.getAppKeys(), clonedKeys.getAppKeys()) {
 		t.Fatal("Cloned object must not affect original object.")
 	}
 }

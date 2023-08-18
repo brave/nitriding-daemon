@@ -8,34 +8,31 @@ import (
 
 // workerManager manages worker enclaves.
 type workerManager struct {
-	timeout       time.Duration
-	reg, unreg    chan *url.URL
-	len           chan int
-	forAllFunc    chan func(*url.URL)
-	afterTickFunc chan func()
+	timeout    time.Duration
+	reg, unreg chan *url.URL
+	len        chan int
+	forAllFunc chan func(*url.URL)
 }
 
-// workers maps worker enclaves to a timestamp that keeps track of when we last
-// got a heartbeat from the enclave.
+// workers maps worker enclaves (identified by a URL) to a timestamp that keeps
+// track of when we last got a heartbeat from the worker.
 type workers map[url.URL]time.Time
 
 func newWorkerManager(timeout time.Duration) *workerManager {
 	return &workerManager{
-		timeout:       timeout,
-		reg:           make(chan *url.URL),
-		unreg:         make(chan *url.URL),
-		len:           make(chan int),
-		forAllFunc:    make(chan func(*url.URL)),
-		afterTickFunc: make(chan func()),
+		timeout:    timeout,
+		reg:        make(chan *url.URL),
+		unreg:      make(chan *url.URL),
+		len:        make(chan int),
+		forAllFunc: make(chan func(*url.URL)),
 	}
 }
 
 // start starts the worker manager's event loop.
 func (w *workerManager) start(ctx context.Context) {
 	var (
-		set           = make(workers)
-		timer         = time.NewTicker(w.timeout)
-		afterTickFunc = func() {}
+		set   = make(workers)
+		timer = time.NewTicker(w.timeout)
 	)
 	elog.Println("Starting worker event loop.")
 	defer elog.Println("Stopping worker event loop.")
@@ -45,12 +42,14 @@ func (w *workerManager) start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 
-		case f := <-w.afterTickFunc:
-			afterTickFunc = f
-
 		case <-timer.C:
-			go w.pruneDefunctWorkers(set)
-			afterTickFunc()
+			now := time.Now()
+			for worker, lastSeen := range set {
+				if now.Sub(lastSeen) > w.timeout {
+					delete(set, worker)
+					elog.Printf("Pruned %s from worker set.", worker.Host)
+				}
+			}
 
 		case worker := <-w.reg:
 			set[*worker] = time.Now()
@@ -79,12 +78,6 @@ func (w *workerManager) runForAll(f func(*url.URL), set workers) {
 	}
 }
 
-// _afterTick runs the given function after the next event loop tick.  This is
-// only useful in unit tests.
-func (w *workerManager) _afterTick(f func()) {
-	w.afterTickFunc <- f
-}
-
 // length returns the number of workers that are currently registered.
 func (w *workerManager) length() int {
 	w.len <- 0 // Signal to the event loop that we want the length.
@@ -105,16 +98,4 @@ func (w *workerManager) register(worker *url.URL) {
 // unregister unregisters the given worker enclave.
 func (w *workerManager) unregister(worker *url.URL) {
 	w.unreg <- worker
-}
-
-// pruneDefunctWorkers looks for and unregisters workers whose last heartbeat is
-// older than our timeout.
-func (w *workerManager) pruneDefunctWorkers(set workers) {
-	now := time.Now()
-	for worker, lastSeen := range set {
-		if now.Sub(lastSeen) > w.timeout {
-			w.unregister(&worker)
-			elog.Printf("Pruned %s from worker set.", worker.Host)
-		}
-	}
 }

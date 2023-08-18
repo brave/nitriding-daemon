@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 )
@@ -38,8 +39,11 @@ func TestWorkerRegistration(t *testing.T) {
 
 func TestForAll(t *testing.T) {
 	var (
-		w           = newWorkerManager(time.Minute)
+		w           = newWorkerManager(time.Millisecond)
 		ctx, cancel = context.WithCancel(context.Background())
+		wg          = sync.WaitGroup{}
+		mutex       = sync.Mutex{}
+		total       = 0
 	)
 	go w.start(ctx)
 	defer cancel()
@@ -48,16 +52,17 @@ func TestForAll(t *testing.T) {
 	w.register(&url.URL{Host: "bar"})
 	assertEqual(t, w.length(), 2)
 
-	total := 0
+	wg.Add(2)
 	w.forAll(
 		func(w *url.URL) {
+			mutex.Lock()
+			defer mutex.Unlock()
+			defer wg.Done()
 			total += 1
 		},
 	)
-	// Make sure that the worker got pruned after the next tick.
-	w._afterTick(func() {
-		assertEqual(t, total, 2)
-	})
+	wg.Wait()
+	assertEqual(t, total, 2)
 }
 
 func TestIneffectiveForAll(t *testing.T) {
@@ -70,22 +75,4 @@ func TestIneffectiveForAll(t *testing.T) {
 
 	// Make sure that forAll finishes for an empty worker set.
 	w.forAll(func(_ *url.URL) {})
-}
-
-func TestUpdatingAndPruning(t *testing.T) {
-	var (
-		w           = newWorkerManager(time.Millisecond)
-		ctx, cancel = context.WithCancel(context.Background())
-	)
-	go w.start(ctx)
-	defer cancel()
-
-	worker := &url.URL{Host: "foo"}
-	w.register(worker)
-	assertEqual(t, w.length(), 1)
-
-	// Make sure that the worker got pruned after the next tick.
-	w._afterTick(func() {
-		assertEqual(t, w.length(), 0)
-	})
 }

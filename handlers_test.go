@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -34,6 +35,17 @@ func newResp(status int, body string) *http.Response {
 		StatusCode: status,
 		Body:       io.NopCloser(bytes.NewBufferString(body)),
 	}
+}
+
+// designateLeader designates the enclave as a leader to make leader-specific
+// endpoints available.
+func designateLeader(t *testing.T, srv *http.Server) {
+	t.Helper()
+	makeReq := makeRequestFor(srv)
+	assertResponse(t,
+		makeReq(http.MethodGet, pathLeader, nil),
+		newResp(http.StatusOK, ""),
+	)
 }
 
 // assertResponse ensures that the two given HTTP responses are (almost)
@@ -96,17 +108,10 @@ func signalReady(t *testing.T, e *Enclave) {
 
 func TestStateHandlers(t *testing.T) {
 	e := createEnclave(&defaultCfg)
-
-	// First, designate the enclave as leader to make the "put state" endpoint
-	// available.
-	makeReq := makeRequestFor(e.extPrivSrv)
-	assertResponse(t,
-		makeReq(http.MethodGet, pathLeader, nil),
-		newResp(http.StatusOK, ""),
-	)
+	designateLeader(t, e.extPrivSrv)
 
 	tooLargeKey := make([]byte, 1024*1024+1)
-	makeReq = makeRequestFor(e.intSrv)
+	makeReq := makeRequestFor(e.intSrv)
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, bytes.NewReader(tooLargeKey)),
 		newResp(http.StatusInternalServerError, errFailedReqBody.Error()),
@@ -334,4 +339,72 @@ func TestConfigHandler(t *testing.T) {
 		makeReq(http.MethodGet, pathConfig, nil),
 		newResp(http.StatusOK, defaultCfg.String()),
 	)
+}
+
+func TestHeartbeatHandler(t *testing.T) {
+	var (
+		e       = createEnclave(&defaultCfg)
+		keys    = newTestKeys(t)
+		makeReq = makeRequestFor(e.extPrivSrv)
+	)
+	designateLeader(t, e.extPrivSrv)
+	e.keys.set(keys)
+
+	tooLargeBuf := bytes.NewBuffer(make([]byte, maxEnclaveKeyHash+1))
+	assertResponse(t,
+		makeReq(http.MethodPost, pathHeartbeat, tooLargeBuf),
+		newResp(http.StatusInternalServerError, errFailedReqBody.Error()),
+	)
+
+	validKeys := bytes.NewBuffer([]byte(keys.hashAndB64()))
+	assertResponse(t,
+		makeReq(http.MethodPost, pathHeartbeat, validKeys),
+		newResp(http.StatusOK, ""),
+	)
+}
+
+func TestHeartbeatHandlerWithSync(t *testing.T) {
+	var (
+		wg            = sync.WaitGroup{}
+		leaderEnclave = createEnclave(&defaultCfg)
+		makeReq       = makeRequestFor(leaderEnclave.extPrivSrv)
+		workerKeys    = newTestKeys(t)
+		setWorkerKeys = func(keys *enclaveKeys) error {
+			defer wg.Done()
+			workerKeys.set(keys)
+			return nil
+		}
+		worker    = asWorker(setWorkerKeys, make(chan struct{}))
+		workerSrv = httptest.NewTLSServer(worker)
+	)
+	defer workerSrv.Close()
+	leaderEnclave.Start(context.Background())
+	designateLeader(t, leaderEnclave.extPrivSrv)
+	wg.Add(1)
+
+	// Mock two functions to make the leader enclave talk to our test server.
+	newUnauthenticatedHTTPClient = workerSrv.Client
+	getSyncURL = func(host string, port uint16) *url.URL {
+		u, err := url.Parse(workerSrv.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+
+	assertEqual(t, leaderEnclave.workers.length(), 0)
+
+	// Send a heartbeat to the leader.  The heartbeat's keys don't match the
+	// leader's keys,
+	// which results in the leader initiating key synchronization.
+	invalidKeys := bytes.NewBuffer([]byte(workerKeys.hashAndB64()))
+	assertResponse(t,
+		makeReq(http.MethodPost, pathHeartbeat, invalidKeys),
+		newResp(http.StatusOK, ""),
+	)
+
+	// Wait until the worker's keys were set and make sure that the keys were
+	// synchronized successfully.
+	wg.Wait()
+	assertEqual(t, leaderEnclave.keys.equal(workerKeys), true)
 }

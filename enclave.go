@@ -245,7 +245,7 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 		workers:      newWorkerManager(time.Minute),
 		stop:         make(chan struct{}),
 		ready:        make(chan struct{}),
-		becameLeader: make(chan struct{}),
+		becameLeader: make(chan struct{}, 1),
 	}
 
 	// Increase the maximum number of idle connections per host.  This is
@@ -275,7 +275,7 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 
 	// Register external public HTTP API.
 	m := e.extPubSrv.Handler.(*chi.Mux)
-	m.Get(pathAttestation, attestationHandler(e.cfg.UseProfiling, e.hashes))
+	m.Get(pathAttestation, attestationHandler(e.cfg.UseProfiling, e.hashes, e.attester))
 	m.Get(pathRoot, rootHandler(e.cfg))
 	m.Get(pathConfig, configHandler(e.cfg))
 
@@ -607,9 +607,5 @@ func (e *Enclave) getWorker(r *http.Request) (*url.URL, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &url.URL{
-		Scheme: "https", // Leader and workers use HTTPS to communicate.
-		Host:   fmt.Sprintf("%s:%d", strIP, e.cfg.ExtPrivPort),
-		Path:   pathSync,
-	}, nil
+	return getSyncURL(strIP, e.cfg.ExtPrivPort), nil
 }

@@ -9,16 +9,39 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
+	"net/url"
 	"time"
 )
+
+var (
+	errBadSliceLen               = errors.New("slice is not of same length as nonce")
+	newUnauthenticatedHTTPClient = func() *http.Client {
+		return _newUnauthenticatedHTTPClient()
+	}
+	getSyncURL = func(host string, port uint16) *url.URL {
+		return _getSyncURL(host, port)
+	}
+)
+
+// _getSyncURL turns the given host and port into a URL that a leader enclave
+// can sync with.
+var _getSyncURL = func(host string, port uint16) *url.URL {
+	return &url.URL{
+		Scheme: "https",
+		Host:   fmt.Sprintf("%s:%d", host, port),
+		Path:   pathSync,
+	}
+}
 
 // newUnauthenticatedHTTPClient returns an HTTP client that skips HTTPS
 // certificate validation.  In the context of nitriding, this is fine because
 // all we need is a *confidential* channel, and not an authenticated channel.
 // Authentication is handled via attestation documents.
-func newUnauthenticatedHTTPClient() *http.Client {
+func _newUnauthenticatedHTTPClient() *http.Client {
+	fmt.Println("ORIG CLIENT")
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
@@ -79,4 +102,16 @@ func createCertificate(fqdn string) (cert []byte, key []byte, err error) {
 	}
 
 	return pemCert, pemKey, nil
+}
+
+// sliceToNonce copies the given slice into a nonce and returns the nonce.
+func sliceToNonce(s []byte) (nonce, error) {
+	var n nonce
+
+	if len(s) != nonceLen {
+		return nonce{}, errBadSliceLen
+	}
+
+	copy(n[:], s[:nonceLen])
+	return n, nil
 }

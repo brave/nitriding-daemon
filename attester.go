@@ -21,6 +21,11 @@ type attester interface {
 
 type auxInfo interface{}
 
+type clientAuxInfo struct {
+	clientNonce       nonce
+	attestationHashes []byte
+}
+
 // workerAuxInfo holds the auxiliary information of the worker's attestation
 // document.
 type workerAuxInfo struct {
@@ -87,10 +92,17 @@ func (*dummyAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 	return nil, errors.New("invalid auxiliary information")
 }
 
-// nitroAttester implements production functions for the creation and
-// verification of attestation documents.
+// nitroAttester implements the attester interface by drawing on the AWS Nitro
+// Enclave hypervisor.
 type nitroAttester struct{}
 
+// newNitroAttester returns a new nitroAttester.
+func newNitroAttester() *nitroAttester {
+	return &nitroAttester{}
+}
+
+// createAttstn asks the AWS Nitro Enclave hypervisor for an attestation
+// document that contains the given auxiliary information.
 func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 	var nonce, userData, publicKey []byte
 
@@ -103,6 +115,9 @@ func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 	case leaderAuxInfo:
 		nonce = v.WorkersNonce[:]
 		userData = v.EnclaveKeys
+	case clientAuxInfo:
+		nonce = v.clientNonce[:]
+		userData = v.attestationHashes
 	}
 
 	s, err := nsm.OpenDefaultSession()
@@ -111,7 +126,7 @@ func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 	}
 	defer func() {
 		if err = s.Close(); err != nil {
-			elog.Printf("Attestation: Failed to close default NSM session: %s", err)
+			elog.Printf("Error closing NSM session: %v", err)
 		}
 	}()
 
@@ -130,6 +145,8 @@ func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 	return res.Attestation.Document, nil
 }
 
+// verifyAttstn verifies the given attestation document and, if successful,
+// returns the document's auxiliary information.
 func (*nitroAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 	errStr := "error verifying attestation document"
 	// Verify the remote enclave's attestation document before doing anything
@@ -137,24 +154,24 @@ func (*nitroAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 	opts := nitrite.VerifyOptions{CurrentTime: currentTime()}
 	their, err := nitrite.Verify(doc, opts)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", errStr, err)
+		return nil, fmt.Errorf("%v: %w", errStr, err)
 	}
 
 	// Verify that the remote enclave's PCR values (e.g., the image ID) are
 	// identical to ours.
 	ourPCRs, err := getPCRValues()
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", errStr, err)
+		return nil, fmt.Errorf("%v: %w", errStr, err)
 	}
 	if !arePCRsIdentical(ourPCRs, their.Document.PCRs) {
-		return nil, fmt.Errorf("%s: PCR values of remote enclave not identical to ours", errStr)
+		return nil, fmt.Errorf("%v: PCR values of remote enclave not identical to ours", errStr)
 	}
 
 	// Verify that the remote enclave's attestation document contains the nonce
 	// that we asked it to embed.
 	b64Nonce := base64.StdEncoding.EncodeToString(their.Document.Nonce)
 	if n.B64() == b64Nonce {
-		return nil, fmt.Errorf("%s: nonce %s not in cache", errStr, b64Nonce)
+		return nil, fmt.Errorf("%v: nonce %s not in cache", errStr, b64Nonce)
 	}
 
 	workersNonce, err := sliceToNonce(their.Document.Nonce)
@@ -183,15 +200,4 @@ func (*nitroAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 		WorkersNonce: workersNonce,
 		EnclaveKeys:  their.Document.UserData,
 	}, nil
-}
-
-func sliceToNonce(s []byte) (nonce, error) {
-	var n nonce
-
-	if len(s) != nonceLen {
-		return nonce{}, errors.New("slice is not of same length as nonce")
-	}
-
-	copy(n[:], s[:nonceLen])
-	return n, nil
 }
