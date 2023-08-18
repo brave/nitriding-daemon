@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -212,21 +213,20 @@ func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.Handl
 // leaderHandler is called when the enclave is designated as leader enclave.
 // If designated, we do the following:
 //
-//  1. Signal to other parts of the code that we became the leader.
+//  1. Signal to our leader registration goroutine that we're the leader.
 //  2. Start the worker event loop, to keep track of worker enclaves.
 //  3. Expose leader-specific endpoints.
 func leaderHandler(ctx context.Context, e *Enclave) http.HandlerFunc {
+	var once sync.Once
 	return func(w http.ResponseWriter, r *http.Request) {
-		elog.Println("Designated enclave as leader.")
-		close(e.becameLeader) // Signal to other parts of the code.
-		// TODO: Repeated calls make the goroutine panic.
-
-		go e.workers.start(ctx)
-		// Make leader-specific endpoints available.
-		e.intSrv.Handler.(*chi.Mux).Put(pathState, putStateHandler(e))
-		e.extPrivSrv.Handler.(*chi.Mux).Post(pathHeartbeat, heartbeatHandler(e))
-		elog.Println("Set up worker registration and heartbeat endpoint.")
-
+		once.Do(func() {
+			e.becameLeader <- struct{}{}
+			go e.workers.start(ctx)
+			// Make leader-specific endpoints available.
+			e.intSrv.Handler.(*chi.Mux).Put(pathState, putStateHandler(e))
+			e.extPrivSrv.Handler.(*chi.Mux).Post(pathHeartbeat, heartbeatHandler(e))
+			elog.Println("Designated enclave as leader.")
+		})
 		w.WriteHeader(http.StatusOK)
 	}
 }
