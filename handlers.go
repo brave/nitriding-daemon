@@ -176,7 +176,7 @@ func configHandler(cfg *Config) http.HandlerFunc {
 // subsequently asks its hypervisor for an attestation document that contains
 // both the nonce and the hashes in the given struct.  The resulting
 // Base64-encoded attestation document is then returned to the requester.
-func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.HandlerFunc {
+func attestationHandler(useProfiling bool, hashes *AttestationHashes, a attester) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if useProfiling {
 			http.Error(w, errProfilingSet, http.StatusServiceUnavailable)
@@ -200,7 +200,16 @@ func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.Handl
 			return
 		}
 
-		rawDoc, err := attest(rawNonce, hashes.Serialize(), nil)
+		n, err := sliceToNonce(rawNonce)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		rawDoc, err := a.createAttstn(&clientAuxInfo{
+			clientNonce:       n,
+			attestationHashes: hashes.Serialize(),
+		})
 		if err != nil {
 			http.Error(w, errFailedAttestation, http.StatusInternalServerError)
 			return
