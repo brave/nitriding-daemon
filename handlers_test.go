@@ -378,7 +378,9 @@ func TestHeartbeatHandlerWithSync(t *testing.T) {
 		workerSrv = httptest.NewTLSServer(worker)
 	)
 	defer workerSrv.Close()
-	leaderEnclave.Start(context.Background())
+	if err := leaderEnclave.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	designateLeader(t, leaderEnclave.extPrivSrv)
 	wg.Add(1)
 
