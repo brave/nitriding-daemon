@@ -55,6 +55,11 @@ To set up key synchronization, several steps are necessary:
 6. Upon receiving $A_l$, the worker first verifies the attestation document
    (same as above), and decrypts $E$ using $sk$, revealing in $K_s$, the
    sensitive enclave keys. At this point, key synchronization is complete.
+7. After key synchronization, workers send a periodic heartbeat to the leader in
+   a `POST` request.  The request's body contains a Base64-encoded SHA-256 hash
+   over $K_s$.  This allows the leader to verify if the worker's keys are still
+   up-to-date.  If not, the leader initiates key-synchronization using the
+   protocol as above.
 
 ## Security considerations
 
