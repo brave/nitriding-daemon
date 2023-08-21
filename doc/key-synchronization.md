@@ -121,6 +121,8 @@ leader->>+worker: POST /enclave/sync (Attestation(nonce_w, E(keys, pk)))
 worker->>worker: Verify attestation & install keys
 worker-->>-leader: OK
 
+worker->>worker: Install HTTPS certificate
+
 Note over worker,workerApp: Application retrieves key material
 workerApp->>+worker: GET /enclave/state
 worker->>worker: Retrieve key material
