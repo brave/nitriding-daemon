@@ -617,7 +617,7 @@ func (e *Enclave) getLeader(path string) *url.URL {
 
 // getWorker returns the worker enclave's URL from the given HTTP request.
 func (e *Enclave) getWorker(r *http.Request) (*url.URL, error) {
-	if e.cfg.Debug {
+	if !inEnclave {
 		// Go's HTTP server sets RemoteAddr to IP:port:
 		// https://pkg.go.dev/net/http#Request
 		strIP, _, err := net.SplitHostPort(r.RemoteAddr)
