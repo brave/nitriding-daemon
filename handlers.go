@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,8 +21,8 @@ const (
 	// The maximum length of the key material (in bytes) that enclave
 	// applications can PUT to our HTTP API.
 	maxKeyMaterialLen = 1024 * 1024
-	// The maximum length (in bytes) of the hash over our enclave keys.
-	maxEnclaveKeyHash = 128
+	// The maximum length (in bytes) of a heartbeat's request body.
+	maxHeartbeatBody = 128 + 255 + 128
 	// The HTML for the enclave's index page.
 	indexPage = "This host runs inside an AWS Nitro Enclave.\n"
 )
@@ -241,11 +242,18 @@ func leaderHandler(ctx context.Context, e *Enclave) http.HandlerFunc {
 
 func heartbeatHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(newLimitReader(r.Body, maxEnclaveKeyHash))
+		body, err := io.ReadAll(newLimitReader(r.Body, maxHeartbeatBody))
 		if err != nil {
 			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		var hb heartbeatRequest
+		if err := json.Unmarshal(body, &hb); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Extract the worker's URL.
 		worker, err := e.getWorker(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -10,12 +11,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	_ "net/http/pprof"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -357,11 +358,16 @@ func (e *Enclave) Start(ctx context.Context) error {
 	}
 
 	if e.cfg.isScalingEnabled() {
-		err := asWorker(e.installKeys, e.becameLeader).registerWith(leader)
+		workerHostname, err := getLocalEC2Hostname(e.cfg.ExtPrivPort)
+		if err != nil {
+			elog.Fatalf("Error determining instance hostname: %v", err)
+		}
+		worker := getSyncURL(workerHostname, e.cfg.ExtPrivPort)
+		err = asWorker(e.installKeys, e.becameLeader).registerWith(leader, worker)
 		if err != nil && !errors.Is(err, errBecameLeader) {
 			elog.Fatalf("Error syncing with leader: %v", err)
 		} else if err == nil {
-			go e.workerHeartbeat(ctx)
+			go e.workerHeartbeat(ctx, worker)
 		}
 	}
 
@@ -372,12 +378,15 @@ func (e *Enclave) Start(ctx context.Context) error {
 // know that we're still alive, and 2) to compare key material.  If it turns out
 // that the leader has different key material than the worker, the worker
 // re-registers itself, which triggers key re-synchronization.
-func (e *Enclave) workerHeartbeat(ctx context.Context) {
+func (e *Enclave) workerHeartbeat(ctx context.Context, worker *url.URL) {
 	elog.Println("Starting worker's heartbeat loop.")
 	defer elog.Println("Exiting worker's heartbeat loop.")
 	var (
 		leader = e.getLeader(pathHeartbeat)
 		timer  = time.NewTicker(time.Minute)
+		hbBody = heartbeatRequest{
+			WorkerHostname: worker.Host,
+		}
 	)
 
 	for {
@@ -385,10 +394,17 @@ func (e *Enclave) workerHeartbeat(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
+			hbBody.HashedKeys = e.keys.hashAndB64()
+			body, err := json.Marshal(hbBody)
+			if err != nil {
+				elog.Printf("Error marshalling heartbeat request: %v", err)
+				continue
+			}
+
 			resp, err := newUnauthenticatedHTTPClient().Post(
 				leader.String(),
 				"text/plain",
-				strings.NewReader(e.keys.hashAndB64()),
+				bytes.NewReader(body),
 			)
 			if err != nil {
 				elog.Printf("Error posting heartbeat to leader: %v", err)
@@ -601,11 +617,29 @@ func (e *Enclave) getLeader(path string) *url.URL {
 
 // getWorker returns the worker enclave's URL from the given HTTP request.
 func (e *Enclave) getWorker(r *http.Request) (*url.URL, error) {
-	// Go's HTTP server sets RemoteAddr to IP:port:
-	// https://pkg.go.dev/net/http#Request
-	strIP, _, err := net.SplitHostPort(r.RemoteAddr)
+	if e.cfg.Debug {
+		// Go's HTTP server sets RemoteAddr to IP:port:
+		// https://pkg.go.dev/net/http#Request
+		strIP, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			return nil, err
+		}
+		elog.Printf("Worker's address from request source: %s", strIP)
+		return getSyncURL(strIP, e.cfg.ExtPrivPort), nil
+	}
+
+	body, err := io.ReadAll(newLimitReader(r.Body, maxHeartbeatBody))
 	if err != nil {
 		return nil, err
 	}
-	return getSyncURL(strIP, e.cfg.ExtPrivPort), nil
+	defer r.Body.Close()
+	// Make the request's body readable again.
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+
+	var hb heartbeatRequest
+	if err := json.Unmarshal(body, &hb); err != nil {
+		return nil, err
+	}
+	elog.Printf("Worker's address from request body: %s", hb.WorkerHostname)
+	return getSyncURL(hb.WorkerHostname, e.cfg.ExtPrivPort), nil
 }

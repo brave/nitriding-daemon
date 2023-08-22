@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -47,13 +48,23 @@ func asWorker(
 	}
 }
 
-// registerWith registers the worker with the given leader enclave.
-func (s *workerSync) registerWith(leader *url.URL) error {
+type heartbeatRequest struct {
+	HashedKeys     string `json:"hashed_keys"`
+	WorkerHostname string `json:"worker_hostname"`
+}
+
+// registerWith registers the given worker with the given leader enclave.
+func (s *workerSync) registerWith(leader, worker *url.URL) error {
 	elog.Println("Attempting to sync with leader.")
 
 	errChan := make(chan error)
 	register := func(e chan error) {
-		resp, err := newUnauthenticatedHTTPClient().Post(leader.String(), "text/plain", nil)
+		body, err := json.Marshal(heartbeatRequest{WorkerHostname: worker.Host})
+		if err != nil {
+			e <- err
+			return
+		}
+		resp, err := newUnauthenticatedHTTPClient().Post(leader.String(), "text/plain", bytes.NewBuffer(body))
 		if err != nil {
 			e <- err
 			return

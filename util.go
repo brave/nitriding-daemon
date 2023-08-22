@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -10,10 +11,14 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 )
 
 var (
@@ -113,4 +118,29 @@ func sliceToNonce(s []byte) (nonce, error) {
 
 	copy(n[:], s[:nonceLen])
 	return n, nil
+}
+
+// getLocalEC2Hostname returns the hostname of the EC2 instance or an error.
+// The hostname is going to look like: ip-1-2-3-4.us-east-2.compute.internal
+func getLocalEC2Hostname(port uint16) (string, error) {
+	cfg, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		return "", err
+	}
+	client := imds.NewFromConfig(cfg)
+	output, err := client.GetMetadata(
+		context.Background(),
+		&imds.GetMetadataInput{
+			Path: "local-hostname",
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	rawHostname, err := io.ReadAll(output.Content)
+	if err != nil {
+		return "", err
+	}
+	return string(rawHostname), nil
 }
