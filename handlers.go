@@ -100,7 +100,6 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 		go e.workers.forAll(
 			func(worker *url.URL) {
 				if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
-					// TODO: Log in Prometheus.
 					e.workers.unregister(worker)
 				}
 			},
