@@ -9,7 +9,9 @@ import (
 )
 
 const (
-	boxKeyLen = 32 // NaCl box's private and public key length.
+	nonceLen       = 20           // The size of a nonce in bytes.
+	nonceNumDigits = nonceLen * 2 // The number of hex digits in a nonce.
+	boxKeyLen      = 32           // NaCl box's private and public key length.
 )
 
 var (
