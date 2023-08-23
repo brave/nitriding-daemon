@@ -189,7 +189,6 @@ func getLocalEC2Hostname() (string, error) {
 		return "", err
 	}
 	token := string(body)
-	elog.Printf("session token: %s", token)
 
 	// Having obtained the session token, we can now make the actual metadata
 	// request.
