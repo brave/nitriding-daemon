@@ -53,7 +53,7 @@ func (w *workerManager) start(ctx context.Context) {
 
 		case worker := <-w.reg:
 			set[*worker] = time.Now()
-			elog.Printf("Registered worker %s; %d worker(s) now registered.",
+			elog.Printf("(Re-)registered worker %s; %d worker(s) now registered.",
 				worker.Host, len(set))
 
 		case worker := <-w.unreg:
