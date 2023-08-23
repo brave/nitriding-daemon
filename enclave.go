@@ -357,11 +357,8 @@ func (e *Enclave) Start(ctx context.Context) error {
 	}
 
 	if e.cfg.isScalingEnabled() {
-		workerHostname, err := getLocalEC2Hostname()
-		if err != nil {
-			elog.Fatalf("Error determining instance hostname: %v", err)
-		}
-		worker := getSyncURL(workerHostname, e.cfg.ExtPrivPort)
+		elog.Println("Obtaining worker's hostname.")
+		worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
 		err = asWorker(e.installKeys, e.becameLeader).registerWith(leader, worker)
 		if err != nil && !errors.Is(err, errBecameLeader) {
 			elog.Fatalf("Error syncing with leader: %v", err)

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -122,6 +123,51 @@ func sliceToNonce(s []byte) (nonce, error) {
 
 	copy(n[:], s[:nonceLen])
 	return n, nil
+}
+
+// getHostnameOrDie returns the "enclave"'s hostname (or IP address) or dies
+// trying.  If inside an enclave, we query AWS's Instance Metadata Service.  If
+// outside an enclave, we pick whatever IP address the operating system would
+// choose when talking to a public IP address.
+func getHostnameOrDie() string {
+	var (
+		err      error
+		hostname string
+	)
+
+	if !inEnclave {
+		hostname = getLocalAddr()
+		elog.Printf("Test hostname: %s", hostname)
+		return hostname
+	}
+
+	for i := 0; i < 5; i++ {
+		hostname, err = getLocalEC2Hostname()
+		if err == nil {
+			elog.Printf("EC2 hostname: %s", hostname)
+			return hostname
+		}
+		time.Sleep(time.Second)
+	}
+	if err != nil {
+		elog.Fatalf("Error obtaining hostname from IMDSv2: %v", err)
+	}
+	return ""
+}
+
+func getLocalAddr() string {
+	const target = "1.1.1.1:53"
+	conn, err := net.Dial("udp", target)
+	if err != nil {
+		elog.Fatalf("Error dialing %s: %v", target, err)
+	}
+	defer conn.Close()
+
+	host, _, err := net.SplitHostPort(conn.LocalAddr().String())
+	if err != nil {
+		elog.Fatalf("Error extracing host: %v", err)
+	}
+	return host
 }
 
 func getLocalEC2Hostname() (string, error) {
