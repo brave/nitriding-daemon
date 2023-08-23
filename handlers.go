@@ -262,7 +262,7 @@ func heartbeatHandler(e *Enclave) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		worker, err := e.getWorker(r, &hb)
+		worker, err := e.getWorker(&hb)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
