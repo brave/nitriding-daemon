@@ -129,30 +129,32 @@ func sliceToNonce(s []byte) (nonce, error) {
 // trying.  If inside an enclave, we query AWS's Instance Metadata Service.  If
 // outside an enclave, we pick whatever IP address the operating system would
 // choose when talking to a public IP address.
-func getHostnameOrDie() string {
-	var (
-		err      error
-		hostname string
-	)
+func getHostnameOrDie() (hostname string) {
+	defer func() {
+		elog.Printf("Determined our hostname: %s", hostname)
+	}()
+	var err error
 
 	if !inEnclave {
 		hostname = getLocalAddr()
-		elog.Printf("Test hostname: %s", hostname)
-		return hostname
+		return
 	}
 
-	for i := 0; i < 5; i++ {
+	// We cannot easily tell when all components are in place to receive
+	// incoming connections.  We therefore make five attempts to get our
+	// hostname from IMDS while waiting for one second in between attempts.
+	const retries = 5
+	for i := 0; i < retries; i++ {
 		hostname, err = getLocalEC2Hostname()
 		if err == nil {
-			elog.Printf("EC2 hostname: %s", hostname)
-			return hostname
+			return
 		}
 		time.Sleep(time.Second)
 	}
 	if err != nil {
 		elog.Fatalf("Error obtaining hostname from IMDSv2: %v", err)
 	}
-	return ""
+	return
 }
 
 func getLocalAddr() string {
