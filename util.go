@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -16,9 +15,14 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+)
 
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
+const (
+	// The endpoint of AWS's Instance Metadata Service, which allows an enclave
+	// to learn its internal hostname:
+	// https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html
+	metadataSvcToken = "http://169.254.169.254/latest/api/token"
+	metadataSvcInfo  = "http://169.254.169.254/latest/meta-data/local-hostname"
 )
 
 var (
@@ -120,27 +124,39 @@ func sliceToNonce(s []byte) (nonce, error) {
 	return n, nil
 }
 
-// getLocalEC2Hostname returns the hostname of the EC2 instance or an error.
-// The hostname is going to look like: ip-1-2-3-4.us-east-2.compute.internal
-func getLocalEC2Hostname(port uint16) (string, error) {
-	cfg, err := config.LoadDefaultConfig(context.Background())
+func getLocalEC2Hostname() (string, error) {
+	// IMDSv2, which we are using, is session-oriented (God knows why), so we
+	// first obtain a session token from the service.
+	req, err := http.NewRequest(http.MethodPut, metadataSvcToken, nil)
 	if err != nil {
 		return "", err
 	}
-	client := imds.NewFromConfig(cfg)
-	output, err := client.GetMetadata(
-		context.Background(),
-		&imds.GetMetadataInput{
-			Path: "local-hostname",
-		},
-	)
+	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "10")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	token := string(body)
+	elog.Printf("session token: %s", token)
 
-	rawHostname, err := io.ReadAll(output.Content)
+	// Having obtained the session token, we can now make the actual metadata
+	// request.
+	req, err = http.NewRequest(http.MethodGet, metadataSvcInfo, nil)
 	if err != nil {
 		return "", err
 	}
-	return string(rawHostname), nil
+	req.Header.Set("X-aws-ec2-metadata-token", token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
 }

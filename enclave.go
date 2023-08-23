@@ -11,7 +11,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -358,7 +357,7 @@ func (e *Enclave) Start(ctx context.Context) error {
 	}
 
 	if e.cfg.isScalingEnabled() {
-		workerHostname, err := getLocalEC2Hostname(e.cfg.ExtPrivPort)
+		workerHostname, err := getLocalEC2Hostname()
 		if err != nil {
 			elog.Fatalf("Error determining instance hostname: %v", err)
 		}
@@ -615,31 +614,25 @@ func (e *Enclave) getLeader(path string) *url.URL {
 	}
 }
 
-// getWorker returns the worker enclave's URL from the given HTTP request.
-func (e *Enclave) getWorker(r *http.Request) (*url.URL, error) {
+// getWorker takes as input the HTTP request and payload that were sent to the
+// leader's heartbeat endpoint.  The function extracts the worker's URL and
+// returns it.
+func (e *Enclave) getWorker(r *http.Request, hb *heartbeatRequest) (*url.URL, error) {
+	var (
+		host string
+		err  error
+	)
+	host, _, err = net.SplitHostPort(hb.WorkerHostname)
+	// If we're testing the code outside of an enclave, simply use the worker's
+	// source address from the HTTP request.  This doesn't work inside an
+	// enclave because nitriding receives incoming requests via a reverse
+	// proxy that does NAT.  Nitriding therefore never sees the client's IP
+	// address.
 	if !inEnclave {
-		// Go's HTTP server sets RemoteAddr to IP:port:
-		// https://pkg.go.dev/net/http#Request
-		strIP, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			return nil, err
-		}
-		elog.Printf("Worker's address from request source: %s", strIP)
-		return getSyncURL(strIP, e.cfg.ExtPrivPort), nil
+		host, _, err = net.SplitHostPort(r.RemoteAddr)
 	}
-
-	body, err := io.ReadAll(newLimitReader(r.Body, maxHeartbeatBody))
 	if err != nil {
 		return nil, err
 	}
-	defer r.Body.Close()
-	// Make the request's body readable again.
-	r.Body = io.NopCloser(bytes.NewBuffer(body))
-
-	var hb heartbeatRequest
-	if err := json.Unmarshal(body, &hb); err != nil {
-		return nil, err
-	}
-	elog.Printf("Worker's address from request body: %s", hb.WorkerHostname)
-	return getSyncURL(hb.WorkerHostname, e.cfg.ExtPrivPort), nil
+	return getSyncURL(host, e.cfg.ExtPrivPort), nil
 }

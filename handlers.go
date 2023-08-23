@@ -21,8 +21,10 @@ const (
 	// The maximum length of the key material (in bytes) that enclave
 	// applications can PUT to our HTTP API.
 	maxKeyMaterialLen = 1024 * 1024
-	// The maximum length (in bytes) of a heartbeat's request body.
-	maxHeartbeatBody = 128 + 255 + 128
+	// The maximum length (in bytes) of a heartbeat's request body:
+	// 44 bytes for the Base64-encoded SHA-256 hash, 255 bytes for the domain
+	// name, and another 128 bytes for the port and the surrounding JSON.
+	maxHeartbeatBody = 44 + 255 + 128
 	// The HTML for the enclave's index page.
 	indexPage = "This host runs inside an AWS Nitro Enclave.\n"
 )
@@ -242,41 +244,37 @@ func leaderHandler(ctx context.Context, e *Enclave) http.HandlerFunc {
 
 func heartbeatHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		var (
+			hb              heartbeatRequest
+			syncAndRegister = func(keys *enclaveKeys, worker *url.URL) {
+				if err := asLeader(keys.get()).syncWith(worker); err == nil {
+					e.workers.register(worker)
+				}
+			}
+		)
+
 		body, err := io.ReadAll(newLimitReader(r.Body, maxHeartbeatBody))
 		if err != nil {
 			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		var hb heartbeatRequest
 		if err := json.Unmarshal(body, &hb); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		// Extract the worker's URL.
-		worker, err := e.getWorker(r)
+		worker, err := e.getWorker(r, &hb)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		syncAndRegister := func(keys *enclaveKeys, worker *url.URL) {
-			if err := asLeader(keys.get()).syncWith(worker); err == nil {
-				e.workers.register(worker)
-			}
-		}
-
-		if len(body) == 0 {
-			elog.Printf("Got heartbeat from uninitialized worker %s.", worker.Host)
+		elog.Printf("Heartbeat from worker %s.", worker.Host)
+		ourKeysHash, theirKeysHash := e.keys.hashAndB64(), hb.HashedKeys
+		if ourKeysHash != theirKeysHash {
+			elog.Printf("Worker's keys are invalid.  Re-synchronizing.")
 			go syncAndRegister(e.keys, worker)
 		} else {
-			elog.Printf("Got heartbeat from initialized worker %s.", worker.Host)
-			ourKeysHash, theirKeysHash := e.keys.hashAndB64(), string(body)
-			if ourKeysHash != theirKeysHash {
-				go syncAndRegister(e.keys, worker)
-			} else {
-				e.workers.register(worker)
-			}
+			e.workers.register(worker)
 		}
 		w.WriteHeader(http.StatusOK)
 	}
