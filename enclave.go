@@ -611,23 +611,14 @@ func (e *Enclave) getLeader(path string) *url.URL {
 	}
 }
 
-// getWorker takes as input the HTTP request and payload that were sent to the
-// leader's heartbeat endpoint.  The function extracts the worker's URL and
-// returns it.
-func (e *Enclave) getWorker(r *http.Request, hb *heartbeatRequest) (*url.URL, error) {
+// getWorker takes as input the worker's heartbeat request payload and returns
+// the worker's URL.
+func (e *Enclave) getWorker(hb *heartbeatRequest) (*url.URL, error) {
 	var (
 		host string
 		err  error
 	)
 	host, _, err = net.SplitHostPort(hb.WorkerHostname)
-	// If we're testing the code outside of an enclave, simply use the worker's
-	// source address from the HTTP request.  This doesn't work inside an
-	// enclave because nitriding receives incoming requests via a reverse
-	// proxy that does NAT.  Nitriding therefore never sees the client's IP
-	// address.
-	if !inEnclave {
-		host, _, err = net.SplitHostPort(r.RemoteAddr)
-	}
 	if err != nil {
 		return nil, err
 	}
