@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -46,6 +47,20 @@ func designateLeader(t *testing.T, srv *http.Server) {
 		makeReq(http.MethodGet, pathLeader, nil),
 		newResp(http.StatusOK, ""),
 	)
+}
+
+// keysToHeartbeat turns the given keys into a Buffer that contains a heartbeat
+// request.
+func keysToHeartbeat(t *testing.T, keys *enclaveKeys) *bytes.Buffer {
+	t.Helper()
+	blob, err := json.Marshal(&heartbeatRequest{
+		HashedKeys:     keys.hashAndB64(),
+		WorkerHostname: "localhost:1234",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.NewBuffer(blob)
 }
 
 // assertResponse ensures that the two given HTTP responses are (almost)
@@ -350,15 +365,14 @@ func TestHeartbeatHandler(t *testing.T) {
 	designateLeader(t, e.extPrivSrv)
 	e.keys.set(keys)
 
-	tooLargeBuf := bytes.NewBuffer(make([]byte, maxEnclaveKeyHash+1))
+	tooLargeBuf := bytes.NewBuffer(make([]byte, maxHeartbeatBody+1))
 	assertResponse(t,
 		makeReq(http.MethodPost, pathHeartbeat, tooLargeBuf),
 		newResp(http.StatusInternalServerError, errFailedReqBody.Error()),
 	)
 
-	validKeys := bytes.NewBuffer([]byte(keys.hashAndB64()))
 	assertResponse(t,
-		makeReq(http.MethodPost, pathHeartbeat, validKeys),
+		makeReq(http.MethodPost, pathHeartbeat, keysToHeartbeat(t, keys)),
 		newResp(http.StatusOK, ""),
 	)
 }
@@ -397,11 +411,10 @@ func TestHeartbeatHandlerWithSync(t *testing.T) {
 	assertEqual(t, leaderEnclave.workers.length(), 0)
 
 	// Send a heartbeat to the leader.  The heartbeat's keys don't match the
-	// leader's keys,
-	// which results in the leader initiating key synchronization.
-	invalidKeys := bytes.NewBuffer([]byte(workerKeys.hashAndB64()))
+	// leader's keys, which results in the leader initiating key
+	// synchronization.
 	assertResponse(t,
-		makeReq(http.MethodPost, pathHeartbeat, invalidKeys),
+		makeReq(http.MethodPost, pathHeartbeat, keysToHeartbeat(t, workerKeys)),
 		newResp(http.StatusOK, ""),
 	)
 

@@ -34,12 +34,15 @@ func TestSuccessfulRegisterWith(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}),
 	)
-	u, err := url.Parse(srv.URL)
+	leader, err := url.Parse(srv.URL)
 	if err != nil {
 		t.Fatalf("Error creating test server URL: %v", err)
 	}
+	worker := &url.URL{
+		Host: "localhost",
+	}
 
-	err = asWorker(e.installKeys, make(chan struct{})).registerWith(u)
+	err = asWorker(e.installKeys, make(chan struct{})).registerWith(leader, worker)
 	if err != nil {
 		t.Fatalf("Error registering with leader: %v", err)
 	}
@@ -59,7 +62,7 @@ func TestAbortedRegisterWith(t *testing.T) {
 	abortChan := make(chan struct{})
 	ret := make(chan error)
 	go func(ret chan error) {
-		ret <- asWorker(e.installKeys, abortChan).registerWith(bogusURL)
+		ret <- asWorker(e.installKeys, abortChan).registerWith(bogusURL, bogusURL)
 	}(ret)
 
 	// Designate the enclave as leader, after which registration should abort.
