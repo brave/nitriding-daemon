@@ -282,7 +282,7 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 	// Register external but private HTTP API.
 	m = e.extPrivSrv.Handler.(*chi.Mux)
 	m.Get(pathLeader, leaderHandler(ctx, e))
-	m.Handle(pathSync, asWorker(e.installKeys, e.becameLeader))
+	m.Handle(pathSync, asWorker(e.installKeys, e.becameLeader, e.attester))
 
 	// Register enclave-internal HTTP API.
 	m = e.intSrv.Handler.(*chi.Mux)
@@ -359,7 +359,7 @@ func (e *Enclave) Start(ctx context.Context) error {
 	if e.cfg.isScalingEnabled() {
 		elog.Println("Obtaining worker's hostname.")
 		worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
-		err = asWorker(e.installKeys, e.becameLeader).registerWith(leader, worker)
+		err = asWorker(e.installKeys, e.becameLeader, e.attester).registerWith(leader, worker)
 		if err != nil && !errors.Is(err, errBecameLeader) {
 			elog.Fatalf("Error syncing with leader: %v", err)
 		} else if err == nil {

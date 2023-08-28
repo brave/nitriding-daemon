@@ -42,7 +42,7 @@ func TestSuccessfulRegisterWith(t *testing.T) {
 		Host: "localhost",
 	}
 
-	err = asWorker(e.installKeys, make(chan struct{})).registerWith(leader, worker)
+	err = asWorker(e.installKeys, make(chan struct{}), &dummyAttester{}).registerWith(leader, worker)
 	if err != nil {
 		t.Fatalf("Error registering with leader: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestAbortedRegisterWith(t *testing.T) {
 	abortChan := make(chan struct{})
 	ret := make(chan error)
 	go func(ret chan error) {
-		ret <- asWorker(e.installKeys, abortChan).registerWith(bogusURL, bogusURL)
+		ret <- asWorker(e.installKeys, abortChan, &dummyAttester{}).registerWith(bogusURL, bogusURL)
 	}(ret)
 
 	// Designate the enclave as leader, after which registration should abort.
@@ -80,14 +80,14 @@ func TestSuccessfulSync(t *testing.T) {
 	// Set up the worker.
 	worker := createEnclave(&defaultCfg)
 	srv := httptest.NewTLSServer(
-		asWorker(worker.installKeys, make(chan struct{})),
+		asWorker(worker.installKeys, make(chan struct{}), &dummyAttester{}),
 	)
 	workerURL, err := url.Parse(srv.URL)
 	if err != nil {
 		t.Fatalf("Error creating test server URL: %v", err)
 	}
 
-	if err = asLeader(leaderKeys).syncWith(workerURL); err != nil {
+	if err = asLeader(leaderKeys, &dummyAttester{}).syncWith(workerURL); err != nil {
 		t.Fatalf("Error syncing with leader: %v", err)
 	}
 

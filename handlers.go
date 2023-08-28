@@ -102,7 +102,7 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 			e.workers.length())
 		go e.workers.forAll(
 			func(worker *url.URL) {
-				if err := asLeader(e.keys.get()).syncWith(worker); err != nil {
+				if err := asLeader(e.keys.get(), e.attester).syncWith(worker); err != nil {
 					e.workers.unregister(worker)
 				}
 			},
@@ -247,7 +247,7 @@ func heartbeatHandler(e *Enclave) http.HandlerFunc {
 		var (
 			hb              heartbeatRequest
 			syncAndRegister = func(keys *enclaveKeys, worker *url.URL) {
-				if err := asLeader(keys.get()).syncWith(worker); err == nil {
+				if err := asLeader(keys.get(), e.attester).syncWith(worker); err == nil {
 					e.workers.register(worker)
 				}
 			}

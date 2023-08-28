@@ -21,9 +21,9 @@ type leaderSync struct {
 }
 
 // asLeader returns a new leaderSync struct.
-func asLeader(keys *enclaveKeys) *leaderSync {
+func asLeader(keys *enclaveKeys, a attester) *leaderSync {
 	return &leaderSync{
-		attester: &dummyAttester{},
+		attester: a,
 		keys:     keys,
 	}
 }

@@ -12,7 +12,7 @@ var defaultCfg = Config{
 	IntPort:       50002,
 	HostProxyPort: 1024,
 	UseACME:       false,
-	Debug:         false,
+	Debug:         true,
 	FdCur:         1024,
 	FdMax:         4096,
 	WaitForApp:    true,

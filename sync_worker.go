@@ -38,9 +38,10 @@ type workerSync struct {
 func asWorker(
 	installKeys func(*enclaveKeys) error,
 	becameLeader chan struct{},
+	a attester,
 ) *workerSync {
 	return &workerSync{
-		attester:      &dummyAttester{},
+		attester:      a,
 		installKeys:   installKeys,
 		becameLeader:  becameLeader,
 		nonce:         make(chan nonce, 1),

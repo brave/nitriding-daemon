@@ -130,6 +130,9 @@ func main() {
 		}
 		c.AppWebSrv = u
 	}
+	if debug {
+		elog.Println("WARNING: Using debug mode, which must not be enabled in production!")
+	}
 
 	ctx := context.Background()
 	enclave, err := NewEnclave(ctx, c)

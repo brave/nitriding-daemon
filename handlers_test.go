@@ -320,7 +320,9 @@ func TestAttestationHandlerWhileProfiling(t *testing.T) {
 }
 
 func TestAttestationHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).extPubSrv)
+	prodCfg := defaultCfg
+	prodCfg.Debug = false
+	makeReq := makeRequestFor(createEnclave(&prodCfg).extPubSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodPost, pathAttestation, nil),
@@ -388,7 +390,7 @@ func TestHeartbeatHandlerWithSync(t *testing.T) {
 			workerKeys.set(keys)
 			return nil
 		}
-		worker    = asWorker(setWorkerKeys, make(chan struct{}))
+		worker    = asWorker(setWorkerKeys, make(chan struct{}), &dummyAttester{})
 		workerSrv = httptest.NewTLSServer(worker)
 	)
 	defer workerSrv.Close()
