@@ -42,7 +42,8 @@ To set up key synchronization, several steps are necessary:
    1. ...the attestation document is signed by the AWS Nitro Enclave hypervisor.
       This stops attackers from sending spoofed attestation documents.
    2. ...the attestation document contains $\textrm{nonce}_l$. This stops
-      attackers from replaying old attestation documents.
+      attackers from replaying old attestation documents.  Note that attestation
+      documents [always contain the enclave's image ID](https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html).
    3. ...the attestation document's platform configuration registers are
       identical to the leader's registers. This stops attackers from using
       modified enclaves to extract the sensitive key material.
