@@ -236,3 +236,31 @@ func heartbeatHandler(e *Enclave) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 	}
 }
+
+func getLeaderHandler(ourNonce nonce, weAreLeader chan struct{}) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var (
+			err        error
+			theirNonce nonce
+		)
+		theirNonce, err = getNonceFromReq(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if ourNonce == theirNonce {
+			if len(weAreLeader) == 0 {
+				weAreLeader <- struct{}{}
+			}
+		} else {
+			// We may end up in this branch for two reasons:
+			// 1. We're the leader and a worker beat us to talking to this
+			//    endpoint.
+			// 2. We're a worker and some other entity in the private network is
+			//    talking to this endpoint.  That shouldn't happen.
+			elog.Println("Received nonce that does not match our own.")
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}

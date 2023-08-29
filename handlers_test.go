@@ -38,17 +38,6 @@ func newResp(status int, body string) *http.Response {
 	}
 }
 
-// designateLeader designates the enclave as a leader to make leader-specific
-// endpoints available.
-func designateLeader(t *testing.T, srv *http.Server) {
-	t.Helper()
-	makeReq := makeRequestFor(srv)
-	assertResponse(t,
-		makeReq(http.MethodGet, pathLeader, nil),
-		newResp(http.StatusOK, ""),
-	)
-}
-
 // keysToHeartbeat turns the given keys into a Buffer that contains a heartbeat
 // request.
 func keysToHeartbeat(t *testing.T, keys *enclaveKeys) *bytes.Buffer {
@@ -123,7 +112,7 @@ func signalReady(t *testing.T, e *Enclave) {
 
 func TestStateHandlers(t *testing.T) {
 	e := createEnclave(&defaultCfg)
-	designateLeader(t, e.extPrivSrv)
+	e.setupLeader(context.Background())
 
 	tooLargeKey := make([]byte, 1024*1024+1)
 	makeReq := makeRequestFor(e.intSrv)
@@ -364,7 +353,7 @@ func TestHeartbeatHandler(t *testing.T) {
 		keys    = newTestKeys(t)
 		makeReq = makeRequestFor(e.extPrivSrv)
 	)
-	designateLeader(t, e.extPrivSrv)
+	e.setupLeader(context.Background())
 	e.keys.set(keys)
 
 	tooLargeBuf := bytes.NewBuffer(make([]byte, maxHeartbeatBody+1))
@@ -397,7 +386,7 @@ func TestHeartbeatHandlerWithSync(t *testing.T) {
 	if err := leaderEnclave.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	designateLeader(t, leaderEnclave.extPrivSrv)
+	leaderEnclave.setupLeader(context.Background())
 	wg.Add(1)
 
 	// Mock two functions to make the leader enclave talk to our test server.

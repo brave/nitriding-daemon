@@ -56,7 +56,10 @@ func _newUnauthenticatedHTTPClient() *http.Client {
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
-	return &http.Client{Transport: transport}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   3 * time.Second,
+	}
 }
 
 // createCertificate creates a self-signed certificate and returns the
@@ -231,4 +234,22 @@ func getNonceFromReq(r *http.Request) (nonce, error) {
 		return nonce{}, err
 	}
 	return n, nil
+}
+
+func makeLeaderRequest(leader *url.URL, ourNonce nonce, areWeLeader chan bool, errChan chan error) {
+	elog.Println("Attempting to talk to leader designation endpoint.")
+
+	reqURL := *leader
+	reqURL.RawQuery = fmt.Sprintf("nonce=%x", ourNonce[:])
+	resp, err := newUnauthenticatedHTTPClient().Get(reqURL.String())
+	if err != nil {
+		errChan <- err
+		return
+	}
+	if resp.StatusCode == http.StatusGone {
+		// The leader already knows that it's the leader, and it's not us.
+		areWeLeader <- false
+		return
+	}
+	errChan <- fmt.Errorf("leader designation endpoint returned %d", resp.StatusCode)
 }

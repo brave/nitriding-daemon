@@ -372,70 +372,49 @@ func (e *Enclave) Start(ctx context.Context) error {
 	return nil
 }
 
-func (e *Enclave) weAreLeader(ctx context.Context) bool {
+func (e *Enclave) weAreLeader(ctx context.Context) (result bool) {
 	var (
-		err                  error
-		becameLeader         = make(chan struct{}, 1)
-		ourNonce, theirNonce nonce
+		err         error
+		ourNonce    nonce
+		weAreLeader = make(chan struct{}, 1)
+		areWeLeader = make(chan bool)
+		errChan     = make(chan error)
+		leader      = e.getLeader(pathLeader)
 	)
+	defer func() {
+		elog.Printf("We are leader: %v", result)
+	}()
 
 	ourNonce, err = newNonce()
 	if err != nil {
 		elog.Fatalf("Error creating new nonce: %v", err)
 	}
 
-	// Create an ephemeral endpoint that expects a random nonce.  We
-	// subsequently call the endpoint and if we end up answering our own
-	// request, we know that we're the leader.
 	m := e.extPrivSrv.Handler.(*chi.Mux)
-	m.Get(pathLeader, func(w http.ResponseWriter, r *http.Request) {
-		theirNonce, err = getNonceFromReq(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if ourNonce == theirNonce {
-			e.setupLeader(ctx)
-			if len(becameLeader) == 0 {
-				becameLeader <- struct{}{}
-			}
-		} else {
-			// We're probably the leader and got a request from a worker.
-			elog.Println("Received nonce that does not match our own.")
-		}
-	})
-	// Reset our ephemeral handler.
+	m.Get(pathLeader, getLeaderHandler(ourNonce, weAreLeader))
+	// Reset the handler as we no longer have a need for it.
 	defer m.Get(pathLeader,
 		func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusGone)
 		},
 	)
 
-	// TODO: Maybe try contacting endpoint repeatedly?
-	reqURL := e.getLeader(pathLeader)
-	reqURL.RawQuery = fmt.Sprintf("nonce=%x", ourNonce[:])
-	resp, err := newUnauthenticatedHTTPClient().Get(reqURL.String())
-	if err != nil {
-		elog.Fatalf("Error contacting ephemeral leader endpoint: %v", err)
-	}
-	if resp.StatusCode == http.StatusGone {
-		// The leader already knows that it's the leader, and it's not us.
-		elog.Println("Leader was designated.  It's not us.")
-		return false
-	}
-	if resp.StatusCode != http.StatusOK {
-		elog.Printf("Leader returned status code %d.", resp.StatusCode)
-		return false
-	}
-
-	select {
-	case <-becameLeader:
-		elog.Println("We are the leader.")
-		return true
-	case <-time.After(5 * time.Second):
-		elog.Println("Request to leader timed out.  Assuming we're a worker.")
-		return false
+	timeout := time.NewTicker(10 * time.Second)
+	for {
+		go makeLeaderRequest(leader, ourNonce, areWeLeader, errChan)
+		select {
+		case <-errChan:
+			elog.Println("Not yet able to talk to leader designation endpoint.")
+			continue
+		case result = <-areWeLeader:
+			return
+		case <-weAreLeader:
+			e.setupLeader(ctx)
+			result = true
+			return
+		case <-timeout.C:
+			elog.Fatal("Timed out talking to leader designation endpoint.")
+		}
 	}
 }
 
