@@ -64,19 +64,19 @@ var (
 type Enclave struct {
 	sync.RWMutex
 	attester
-	ctx                       context.Context
-	cfg                       *Config
-	extPubSrv, extPrivSrv     *http.Server
-	intSrv                    *http.Server
-	promSrv                   *http.Server
-	revProxy                  *httputil.ReverseProxy
-	hashes                    *AttestationHashes
-	promRegistry              *prometheus.Registry
-	metrics                   *metrics
-	workers                   *workerManager
-	keys                      *enclaveKeys
-	httpsCert                 *certRetriever
-	ready, stop, becameLeader chan struct{}
+	ctx                   context.Context
+	cfg                   *Config
+	extPubSrv, extPrivSrv *http.Server
+	intSrv                *http.Server
+	promSrv               *http.Server
+	revProxy              *httputil.ReverseProxy
+	hashes                *AttestationHashes
+	promRegistry          *prometheus.Registry
+	metrics               *metrics
+	workers               *workerManager
+	keys                  *enclaveKeys
+	httpsCert             *certRetriever
+	ready, stop           chan struct{}
 }
 
 // Config represents the configuration of our enclave service.
@@ -245,7 +245,6 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 		workers:      newWorkerManager(time.Minute),
 		stop:         make(chan struct{}),
 		ready:        make(chan struct{}),
-		becameLeader: make(chan struct{}, 1),
 	}
 
 	// Increase the maximum number of idle connections per host.  This is
@@ -282,7 +281,7 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 	// Register external but private HTTP API.
 	m = e.extPrivSrv.Handler.(*chi.Mux)
 	m.Get(pathLeader, leaderHandler(ctx, e))
-	m.Handle(pathSync, asWorker(e.installKeys, e.becameLeader, e.attester))
+	m.Handle(pathSync, asWorker(e.installKeys, e.attester))
 
 	// Register enclave-internal HTTP API.
 	m = e.intSrv.Handler.(*chi.Mux)
@@ -356,18 +355,79 @@ func (e *Enclave) Start(ctx context.Context) error {
 		return fmt.Errorf("%s: %w", errPrefix, err)
 	}
 
-	if e.cfg.isScalingEnabled() {
+	if !e.cfg.isScalingEnabled() {
+		return nil
+	}
+
+	elog.Print("Now checking if we're the leader.")
+	// Check if we are the leader.
+	if weAreLeader(e) {
+		elog.Print("We are the leader.")
+	} else {
 		elog.Println("Obtaining worker's hostname.")
 		worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
-		err = asWorker(e.installKeys, e.becameLeader, e.attester).registerWith(leader, worker)
-		if err != nil && !errors.Is(err, errBecameLeader) {
+		err = asWorker(e.installKeys, e.attester).registerWith(leader, worker)
+		if err != nil {
 			elog.Fatalf("Error syncing with leader: %v", err)
-		} else if err == nil {
-			go e.workerHeartbeat(ctx, worker)
 		}
+		go e.workerHeartbeat(ctx, worker)
+
 	}
 
 	return nil
+}
+
+func weAreLeader(e *Enclave) bool {
+	const pathCheckLeader = "/enclave/leader-check"
+	var (
+		becameLeader = make(chan struct{})
+	)
+
+	ourNonce, err := newNonce()
+	if err != nil {
+		elog.Fatalf("Error creating new nonce: %v", err)
+	}
+
+	// Create a temporary endpoint that expects a random nonce.  We subsequently
+	// call the endpoint and if we end up answering our own request, we know
+	// that we're the leader.
+	m := e.extPrivSrv.Handler.(*chi.Mux)
+	m.Get(pathCheckLeader, func(w http.ResponseWriter, r *http.Request) {
+		theirNonce, err := getNonceFromReq(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if ourNonce == theirNonce {
+			close(becameLeader)
+		} else {
+			elog.Print("Received nonce that does not match our own.")
+		}
+	})
+	// Reset our ephemeral handler as it's no longer needed.
+	defer m.Get(
+		pathCheckLeader,
+		func(w http.ResponseWriter, r *http.Request) {},
+	)
+
+	// TODO: Maybe try contacting endpoint repeatedly?
+	reqURL := e.getLeader(pathCheckLeader)
+	reqURL.RawQuery = fmt.Sprintf("nonce=%x", ourNonce[:])
+	resp, err := newUnauthenticatedHTTPClient().Get(reqURL.String())
+	if err != nil {
+		elog.Fatalf("Error contacting ephemeral leader endpoint: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+
+	select {
+	case <-becameLeader:
+		return true
+	case <-time.After(5 * time.Second):
+		return false
+	}
 }
 
 // workerHeartbeat periodically talks to the leader enclave to 1) let the leader

@@ -16,7 +16,6 @@ import (
 )
 
 var (
-	errBecameLeader    = errors.New("became enclave leader")
 	errNonceRequired   = errors.New("nonce is required")
 	errInProgress      = errors.New("key sync already in progress")
 	errInvalidNonceLen = errors.New("invalid nonce length")
@@ -31,19 +30,16 @@ type workerSync struct {
 	installKeys   func(*enclaveKeys) error
 	ephemeralKeys chan *boxKey
 	nonce         chan nonce
-	becameLeader  chan struct{}
 }
 
 // asWorker returns a new workerSync object.
 func asWorker(
 	installKeys func(*enclaveKeys) error,
-	becameLeader chan struct{},
 	a attester,
 ) *workerSync {
 	return &workerSync{
 		attester:      a,
 		installKeys:   installKeys,
-		becameLeader:  becameLeader,
 		nonce:         make(chan nonce, 1),
 		ephemeralKeys: make(chan *boxKey, 1),
 	}
@@ -91,9 +87,6 @@ func (s *workerSync) registerWith(leader, worker *url.URL) error {
 			elog.Printf("Error registering with leader: %v", err)
 		case <-timeout.C:
 			return errors.New("timed out syncing with leader")
-		case <-s.becameLeader:
-			elog.Println("We became leader. Aborting key sync.")
-			return errBecameLeader
 		case <-retry.C:
 			go register(errChan)
 		}

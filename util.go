@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -206,4 +208,27 @@ func getLocalEC2Hostname() (string, error) {
 		return "", err
 	}
 	return string(body), nil
+}
+
+func getNonceFromReq(r *http.Request) (nonce, error) {
+	if err := r.ParseForm(); err != nil {
+		return nonce{}, errBadForm
+	}
+
+	strNonce := r.URL.Query().Get("nonce")
+	if strNonce == "" {
+		return nonce{}, errNoNonce
+	}
+	strNonce = strings.ToLower(strNonce)
+	// Decode hex-encoded nonce.
+	rawNonce, err := hex.DecodeString(strNonce)
+	if err != nil {
+		return nonce{}, errBadNonceFormat
+	}
+
+	n, err := sliceToNonce(rawNonce)
+	if err != nil {
+		return nonce{}, err
+	}
+	return n, nil
 }

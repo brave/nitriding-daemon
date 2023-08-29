@@ -315,7 +315,7 @@ func TestAttestationHandlerWhileProfiling(t *testing.T) {
 	// Ensure that the attestation handler aborts if profiling is enabled.
 	assertResponse(t,
 		makeReq(http.MethodGet, pathAttestation, nil),
-		newResp(http.StatusServiceUnavailable, errProfilingSet),
+		newResp(http.StatusServiceUnavailable, errProfilingSet.Error()),
 	)
 }
 
@@ -331,12 +331,12 @@ func TestAttestationHandler(t *testing.T) {
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathAttestation, nil),
-		newResp(http.StatusBadRequest, errNoNonce),
+		newResp(http.StatusBadRequest, errNoNonce.Error()),
 	)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathAttestation+"?nonce=foobar", nil),
-		newResp(http.StatusBadRequest, errBadNonceFormat),
+		newResp(http.StatusBadRequest, errBadNonceFormat.Error()),
 	)
 
 	// If we are not inside an enclave, attestation is going to result in an
@@ -344,7 +344,7 @@ func TestAttestationHandler(t *testing.T) {
 	if !inEnclave {
 		assertResponse(t,
 			makeReq(http.MethodGet, pathAttestation+"?nonce=0000000000000000000000000000000000000000", nil),
-			newResp(http.StatusInternalServerError, errFailedAttestation),
+			newResp(http.StatusInternalServerError, errFailedAttestation.Error()),
 		)
 	}
 }
@@ -390,7 +390,7 @@ func TestHeartbeatHandlerWithSync(t *testing.T) {
 			workerKeys.set(keys)
 			return nil
 		}
-		worker    = asWorker(setWorkerKeys, make(chan struct{}), &dummyAttester{})
+		worker    = asWorker(setWorkerKeys, &dummyAttester{})
 		workerSrv = httptest.NewTLSServer(worker)
 	)
 	defer workerSrv.Close()

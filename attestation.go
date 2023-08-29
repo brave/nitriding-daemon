@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 
 	"github.com/hf/nitrite"
@@ -15,11 +16,11 @@ const (
 )
 
 var (
-	errBadForm           = "failed to parse POST form data"
-	errNoNonce           = "could not find nonce in URL query parameters"
-	errBadNonceFormat    = fmt.Sprintf("unexpected nonce format; must be %d-digit hex string", nonceNumDigits)
-	errFailedAttestation = "failed to obtain attestation document from hypervisor"
-	errProfilingSet      = "attestation disabled because profiling is enabled"
+	errBadForm           = errors.New("failed to parse POST form data")
+	errNoNonce           = errors.New("could not find nonce in URL query parameters")
+	errBadNonceFormat    = fmt.Errorf("unexpected nonce format; must be %d-digit hex string", nonceNumDigits)
+	errFailedAttestation = errors.New("failed to obtain attestation document from hypervisor")
+	errProfilingSet      = errors.New("attestation disabled because profiling is enabled")
 
 	// getPCRValues is a variable pointing to a function that returns PCR
 	// values.  Using a variable allows us to easily mock the function in our

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -181,28 +180,11 @@ func configHandler(cfg *Config) http.HandlerFunc {
 func attestationHandler(useProfiling bool, hashes *AttestationHashes, a attester) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if useProfiling {
-			http.Error(w, errProfilingSet, http.StatusServiceUnavailable)
-			return
-		}
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, errBadForm, http.StatusBadRequest)
+			http.Error(w, errProfilingSet.Error(), http.StatusServiceUnavailable)
 			return
 		}
 
-		nonce := r.URL.Query().Get("nonce")
-		if nonce == "" {
-			http.Error(w, errNoNonce, http.StatusBadRequest)
-			return
-		}
-		nonce = strings.ToLower(nonce)
-		// Decode hex-encoded nonce.
-		rawNonce, err := hex.DecodeString(nonce)
-		if err != nil {
-			http.Error(w, errBadNonceFormat, http.StatusBadRequest)
-			return
-		}
-
-		n, err := sliceToNonce(rawNonce)
+		n, err := getNonceFromReq(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -213,7 +195,7 @@ func attestationHandler(useProfiling bool, hashes *AttestationHashes, a attester
 			attestationHashes: hashes.Serialize(),
 		})
 		if err != nil {
-			http.Error(w, errFailedAttestation, http.StatusInternalServerError)
+			http.Error(w, errFailedAttestation.Error(), http.StatusInternalServerError)
 			return
 		}
 		b64Doc := base64.StdEncoding.EncodeToString(rawDoc)
@@ -231,7 +213,6 @@ func leaderHandler(ctx context.Context, e *Enclave) http.HandlerFunc {
 	var once sync.Once
 	return func(w http.ResponseWriter, r *http.Request) {
 		once.Do(func() {
-			e.becameLeader <- struct{}{}
 			go e.workers.start(ctx)
 			// Make leader-specific endpoints available.
 			e.intSrv.Handler.(*chi.Mux).Put(pathState, putStateHandler(e))
