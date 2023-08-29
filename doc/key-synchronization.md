@@ -80,6 +80,9 @@ The sensitive key material $K_s$ is protected as follows:
   the VPC network _and_ compromise the confidentiality of our HTTPS connection,
   enclave keys are still protected by this ephemeral key pair.
 
+The leader only synchronizes with workers that run _identical_ code.  The leader
+therefore has assurance that workers are not going to game the system.
+
 ```mermaid
 sequenceDiagram
   box rgba(100, 100, 100, .1) Leader enclave
