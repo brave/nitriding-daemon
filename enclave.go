@@ -358,9 +358,8 @@ func (e *Enclave) Start(ctx context.Context) error {
 		return nil
 	}
 
-	elog.Print("Now checking if we're the leader.")
 	// Check if we are the leader.
-	if !weAreLeader(ctx, e) {
+	if !e.weAreLeader(ctx) {
 		elog.Println("Obtaining worker's hostname.")
 		worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
 		err = asWorker(e.installKeys, e.attester).registerWith(leader, worker)
@@ -373,22 +372,24 @@ func (e *Enclave) Start(ctx context.Context) error {
 	return nil
 }
 
-func weAreLeader(ctx context.Context, e *Enclave) bool {
+func (e *Enclave) weAreLeader(ctx context.Context) bool {
 	var (
-		becameLeader = make(chan struct{})
+		err                  error
+		becameLeader         = make(chan struct{}, 1)
+		ourNonce, theirNonce nonce
 	)
 
-	ourNonce, err := newNonce()
+	ourNonce, err = newNonce()
 	if err != nil {
 		elog.Fatalf("Error creating new nonce: %v", err)
 	}
 
-	// Create a temporary endpoint that expects a random nonce.  We subsequently
-	// call the endpoint and if we end up answering our own request, we know
-	// that we're the leader.
+	// Create an ephemeral endpoint that expects a random nonce.  We
+	// subsequently call the endpoint and if we end up answering our own
+	// request, we know that we're the leader.
 	m := e.extPrivSrv.Handler.(*chi.Mux)
 	m.Get(pathLeader, func(w http.ResponseWriter, r *http.Request) {
-		theirNonce, err := getNonceFromReq(r)
+		theirNonce, err = getNonceFromReq(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -396,8 +397,11 @@ func weAreLeader(ctx context.Context, e *Enclave) bool {
 
 		if ourNonce == theirNonce {
 			e.setupLeader(ctx)
-			close(becameLeader)
+			if len(becameLeader) == 0 {
+				becameLeader <- struct{}{}
+			}
 		} else {
+			// We're probably the leader and got a request from a worker.
 			elog.Println("Received nonce that does not match our own.")
 		}
 	})
@@ -417,6 +421,7 @@ func weAreLeader(ctx context.Context, e *Enclave) bool {
 	}
 	if resp.StatusCode == http.StatusGone {
 		// The leader already knows that it's the leader, and it's not us.
+		elog.Println("Leader was designated.  It's not us.")
 		return false
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -426,8 +431,10 @@ func weAreLeader(ctx context.Context, e *Enclave) bool {
 
 	select {
 	case <-becameLeader:
+		elog.Println("We are the leader.")
 		return true
 	case <-time.After(5 * time.Second):
+		elog.Println("Request to leader timed out.  Assuming we're a worker.")
 		return false
 	}
 }
@@ -437,7 +444,7 @@ func (e *Enclave) setupLeader(ctx context.Context) {
 	// Make leader-specific endpoints available.
 	e.intSrv.Handler.(*chi.Mux).Put(pathState, putStateHandler(e))
 	e.extPrivSrv.Handler.(*chi.Mux).Post(pathHeartbeat, heartbeatHandler(e))
-	elog.Println("Designated enclave as leader.")
+	elog.Println("Set up leader endpoints and started worker event loop.")
 }
 
 // workerHeartbeat periodically talks to the leader enclave to 1) let the leader
