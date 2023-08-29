@@ -280,7 +280,6 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 
 	// Register external but private HTTP API.
 	m = e.extPrivSrv.Handler.(*chi.Mux)
-	m.Get(pathLeader, leaderHandler(ctx, e))
 	m.Handle(pathSync, asWorker(e.installKeys, e.attester))
 
 	// Register enclave-internal HTTP API.
@@ -361,9 +360,7 @@ func (e *Enclave) Start(ctx context.Context) error {
 
 	elog.Print("Now checking if we're the leader.")
 	// Check if we are the leader.
-	if weAreLeader(e) {
-		elog.Print("We are the leader.")
-	} else {
+	if !weAreLeader(ctx, e) {
 		elog.Println("Obtaining worker's hostname.")
 		worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
 		err = asWorker(e.installKeys, e.attester).registerWith(leader, worker)
@@ -371,14 +368,12 @@ func (e *Enclave) Start(ctx context.Context) error {
 			elog.Fatalf("Error syncing with leader: %v", err)
 		}
 		go e.workerHeartbeat(ctx, worker)
-
 	}
 
 	return nil
 }
 
-func weAreLeader(e *Enclave) bool {
-	const pathCheckLeader = "/enclave/leader-check"
+func weAreLeader(ctx context.Context, e *Enclave) bool {
 	var (
 		becameLeader = make(chan struct{})
 	)
@@ -392,7 +387,7 @@ func weAreLeader(e *Enclave) bool {
 	// call the endpoint and if we end up answering our own request, we know
 	// that we're the leader.
 	m := e.extPrivSrv.Handler.(*chi.Mux)
-	m.Get(pathCheckLeader, func(w http.ResponseWriter, r *http.Request) {
+	m.Get(pathLeader, func(w http.ResponseWriter, r *http.Request) {
 		theirNonce, err := getNonceFromReq(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -400,25 +395,32 @@ func weAreLeader(e *Enclave) bool {
 		}
 
 		if ourNonce == theirNonce {
+			e.setupLeader(ctx)
 			close(becameLeader)
 		} else {
-			elog.Print("Received nonce that does not match our own.")
+			elog.Println("Received nonce that does not match our own.")
 		}
 	})
-	// Reset our ephemeral handler as it's no longer needed.
-	defer m.Get(
-		pathCheckLeader,
-		func(w http.ResponseWriter, r *http.Request) {},
+	// Reset our ephemeral handler.
+	defer m.Get(pathLeader,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusGone)
+		},
 	)
 
 	// TODO: Maybe try contacting endpoint repeatedly?
-	reqURL := e.getLeader(pathCheckLeader)
+	reqURL := e.getLeader(pathLeader)
 	reqURL.RawQuery = fmt.Sprintf("nonce=%x", ourNonce[:])
 	resp, err := newUnauthenticatedHTTPClient().Get(reqURL.String())
 	if err != nil {
 		elog.Fatalf("Error contacting ephemeral leader endpoint: %v", err)
 	}
+	if resp.StatusCode == http.StatusGone {
+		// The leader already knows that it's the leader, and it's not us.
+		return false
+	}
 	if resp.StatusCode != http.StatusOK {
+		elog.Printf("Leader returned status code %d.", resp.StatusCode)
 		return false
 	}
 
@@ -428,6 +430,14 @@ func weAreLeader(e *Enclave) bool {
 	case <-time.After(5 * time.Second):
 		return false
 	}
+}
+
+func (e *Enclave) setupLeader(ctx context.Context) {
+	go e.workers.start(ctx)
+	// Make leader-specific endpoints available.
+	e.intSrv.Handler.(*chi.Mux).Put(pathState, putStateHandler(e))
+	e.extPrivSrv.Handler.(*chi.Mux).Post(pathHeartbeat, heartbeatHandler(e))
+	elog.Println("Designated enclave as leader.")
 }
 
 // workerHeartbeat periodically talks to the leader enclave to 1) let the leader
