@@ -191,9 +191,9 @@ func (*nitroAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	// If the "public key" field is padded, we know that we're dealing with a
-	// worker's auxiliary information.
-	if bytes.Equal(their.Document.PublicKey, padding) {
+	// If the "public key" field does not contain padding, we know that we're
+	// dealing with a worker's auxiliary information.
+	if !bytes.Equal(their.Document.PublicKey, padding) {
 		return &workerAuxInfo{
 			WorkersNonce: workersNonce,
 			LeadersNonce: leadersNonce,
