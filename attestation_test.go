@@ -21,6 +21,12 @@ func TestArePCRsIdentical(t *testing.T) {
 		t.Fatal("Failed to recognize identical PCRs as such.")
 	}
 
+	// PCR4 should be ignored.
+	pcr1[4], pcr2[4] = []byte("foo"), []byte("bar")
+	if !arePCRsIdentical(pcr1, pcr2) {
+		t.Fatal("Failed to recognize identical PCRs as such.")
+	}
+
 	// Add a new PCR value, so our two maps are no longer identical.
 	pcr1[2] = []byte("barfoo")
 	if arePCRsIdentical(pcr1, pcr2) {

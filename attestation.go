@@ -72,6 +72,12 @@ func arePCRsIdentical(ourPCRs, theirPCRs map[uint][]byte) bool {
 	}
 
 	for pcr, ourValue := range ourPCRs {
+		// PCR4 contains a hash over the parent's instance ID.  Our enclaves run
+		// on different parent instances; PCR4 will therefore always differ:
+		// https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html
+		if pcr == 4 {
+			continue
+		}
 		theirValue, exists := theirPCRs[pcr]
 		if !exists {
 			return false
