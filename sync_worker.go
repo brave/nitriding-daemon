@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,10 +16,9 @@ import (
 )
 
 var (
-	errNonceRequired   = errors.New("nonce is required")
 	errInProgress      = errors.New("key sync already in progress")
-	errInvalidNonceLen = errors.New("invalid nonce length")
-	errDecrypting      = errors.New("error decrypting enclave keys")
+	errFailedToDecrypt = errors.New("error decrypting enclave keys")
+	errHashNotInAttstn = errors.New("hash of encrypted keys not in attestation document")
 )
 
 // workerSync holds the state and code that we need for a one-off sync with a
@@ -115,22 +114,10 @@ func (s *workerSync) initSync(w http.ResponseWriter, r *http.Request) {
 
 	// Extract the leader's nonce from the URL, which must look like this:
 	// https://example.com/enclave/sync?nonce=[HEX-ENCODED-NONCE]
-	hexNonce := r.URL.Query().Get("nonce")
-	if hexNonce == "" {
-		http.Error(w, errNonceRequired.Error(), http.StatusBadRequest)
-		return
-	}
-	nonceSlice, err := hex.DecodeString(hexNonce)
+	leadersNonce, err := getNonceFromReq(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
 	}
-	if len(nonceSlice) != nonceLen {
-		http.Error(w, errInvalidNonceLen.Error(), http.StatusBadRequest)
-		return
-	}
-	var leadersNonce nonce
-	copy(leadersNonce[:], nonceSlice)
 
 	// Create the worker's nonce and store it in our channel, so we can later
 	// verify it.
@@ -151,42 +138,69 @@ func (s *workerSync) initSync(w http.ResponseWriter, r *http.Request) {
 	s.ephemeralKeys <- boxKey
 
 	// Create and return the worker's Base64-encoded attestation document.
-	aux := &workerAuxInfo{
+	attstnDoc, err := s.createAttstn(&workerAuxInfo{
 		WorkersNonce: workersNonce,
 		LeadersNonce: leadersNonce,
 		PublicKey:    boxKey.pubKey[:],
-	}
-	attstn, err := s.createAttstn(aux)
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Fprintln(w, base64.StdEncoding.EncodeToString(attstn))
+	respBody, err := json.Marshal(&attstnBody{
+		Document: base64.StdEncoding.EncodeToString(attstnDoc),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintln(w, string(respBody))
 }
 
 // finishSync responds to the leader's final request before key synchronization
 // is complete.
 func (s *workerSync) finishSync(w http.ResponseWriter, r *http.Request) {
+	var (
+		reqBody attstnBody
+		keys    enclaveKeys
+	)
 	elog.Println("Received leader's request to complete key sync.")
 
 	// Read the leader's Base64-encoded attestation document.
-	maxReadLen := base64.StdEncoding.EncodedLen(maxAttDocLen)
-	b64Attstn, err := io.ReadAll(newLimitReader(r.Body, maxReadLen))
+	maxReadLen := base64.StdEncoding.EncodedLen(maxAttstnBodyLen)
+	jsonBody, err := io.ReadAll(newLimitReader(r.Body, maxReadLen))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := json.Unmarshal(jsonBody, &reqBody); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+	attstnDoc, err := base64.StdEncoding.DecodeString(reqBody.Document)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Decode Base64 to byte slice.
-	attstn, err := base64.StdEncoding.DecodeString(string(b64Attstn))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	aux, err := s.verifyAttstn(attstn, <-s.nonce)
+	// Verify attestation document and obtain its auxiliary information.
+	aux, err := s.verifyAttstn(attstnDoc, <-s.nonce)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	leaderAux := aux.(*leaderAuxInfo)
+	encrypted, err := base64.StdEncoding.DecodeString(reqBody.EncryptedKeys)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Make sure that the hash of the encrypted key material is present in the
+	// attestation document.
+	hash := sha256.Sum256(encrypted)
+	if !bytes.Equal(hash[:], leaderAux.HashOfEncrypted) {
+		http.Error(w, errHashNotInAttstn.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -195,16 +209,15 @@ func (s *workerSync) finishSync(w http.ResponseWriter, r *http.Request) {
 	// public key that we provided earlier.
 	decrypted, ok := box.OpenAnonymous(
 		nil,
-		aux.(*leaderAuxInfo).EnclaveKeys,
+		encrypted,
 		ephemeralKey.pubKey,
 		ephemeralKey.privKey)
 	if !ok {
-		http.Error(w, errDecrypting.Error(), http.StatusBadRequest)
+		http.Error(w, errFailedToDecrypt.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Install the leader's enclave keys.
-	var keys enclaveKeys
 	if err := json.Unmarshal(decrypted, &keys); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

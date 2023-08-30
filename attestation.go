@@ -10,7 +10,6 @@ import (
 )
 
 const (
-	maxAttDocLen  = 10000 // A (reasonable?) upper limit for attestation doc lengths.
 	hashPrefix    = "sha256:"
 	hashSeparator = ";"
 )
@@ -18,7 +17,7 @@ const (
 var (
 	errBadForm           = errors.New("failed to parse POST form data")
 	errNoNonce           = errors.New("could not find nonce in URL query parameters")
-	errBadNonceFormat    = fmt.Errorf("unexpected nonce format; must be %d-digit hex string", nonceNumDigits)
+	errBadNonceFormat    = fmt.Errorf("unexpected nonce format; must be %d-digit hex string", nonceLen*2)
 	errFailedAttestation = errors.New("failed to obtain attestation document from hypervisor")
 	errProfilingSet      = errors.New("attestation disabled because profiling is enabled")
 

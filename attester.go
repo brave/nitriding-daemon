@@ -2,17 +2,20 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/hf/nitrite"
 	"github.com/hf/nsm"
 	"github.com/hf/nsm/request"
 )
 
-var padding = []byte("dummy")
+var (
+	errPCRMismatch     = errors.New("PCR values differ")
+	errNonceMismatch   = errors.New("nonce is unexpected")
+	errNoAttstnFromNSM = errors.New("NSM device did not return an attestation")
+	padding            = []byte("dummy")
+)
 
 // attester defines functions for the creation and verification of attestation
 // documents.  Making this an interface helps with testing: It allows us to
@@ -24,6 +27,8 @@ type attester interface {
 
 type auxInfo interface{}
 
+// workerAuxInfo holds the auxilitary information of an attestation document
+// requested by clients.
 type clientAuxInfo struct {
 	clientNonce       nonce
 	attestationHashes []byte
@@ -37,23 +42,11 @@ type workerAuxInfo struct {
 	PublicKey    []byte `json:"public_key"`
 }
 
-func (w workerAuxInfo) String() string {
-	return fmt.Sprintf("Worker's auxiliary info:\n"+
-		"Worker's nonce: %x\nLeader's nonce: %x\nPublic key: %x",
-		w.WorkersNonce, w.LeadersNonce, w.PublicKey)
-}
-
 // leaderAuxInfo holds the auxiliary information of the leader's attestation
 // document.
 type leaderAuxInfo struct {
-	WorkersNonce nonce  `json:"workers_nonce"`
-	EnclaveKeys  []byte `json:"enclave_keys"`
-}
-
-func (l leaderAuxInfo) String() string {
-	return fmt.Sprintf("Leader's auxiliary info:\n"+
-		"Worker's nonce: %x\nEnclave keys: %x",
-		l.WorkersNonce, l.EnclaveKeys)
+	WorkersNonce    nonce  `json:"workers_nonce"`
+	HashOfEncrypted []byte `json:"hash_of_encrypted"`
 }
 
 // dummyAttester helps with local testing.  The interface simply turns
@@ -75,7 +68,7 @@ func (*dummyAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 		return nil, err
 	}
 	if len(w.WorkersNonce) == nonceLen && len(w.LeadersNonce) == nonceLen && w.PublicKey != nil {
-		if n.B64() != w.LeadersNonce.B64() {
+		if n.b64() != w.LeadersNonce.b64() {
 			return nil, errors.New("leader nonce not in cache")
 		}
 		return &w, nil
@@ -85,8 +78,8 @@ func (*dummyAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 	if err := json.Unmarshal(doc, &l); err != nil {
 		return nil, err
 	}
-	if len(l.WorkersNonce) == nonceLen && l.EnclaveKeys != nil {
-		if n.B64() != l.WorkersNonce.B64() {
+	if len(l.WorkersNonce) == nonceLen && l.HashOfEncrypted != nil {
+		if n.b64() != l.WorkersNonce.b64() {
 			return nil, errors.New("worker nonce not in cache")
 		}
 		return &l, nil
@@ -114,12 +107,12 @@ func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 	// verify attestation documents) expects all three fields to be set.
 	switch v := aux.(type) {
 	case *workerAuxInfo:
-		nonce = v.WorkersNonce[:]
-		userData = v.LeadersNonce[:]
+		nonce = v.LeadersNonce[:]
+		userData = v.WorkersNonce[:]
 		publicKey = v.PublicKey
 	case *leaderAuxInfo:
 		nonce = v.WorkersNonce[:]
-		userData = v.EnclaveKeys
+		userData = v.HashOfEncrypted
 		publicKey = padding
 	case *clientAuxInfo:
 		nonce = v.clientNonce[:]
@@ -146,7 +139,7 @@ func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 		return nil, err
 	}
 	if res.Attestation == nil || res.Attestation.Document == nil {
-		return nil, errors.New("NSM device did not return an attestation")
+		return nil, errNoAttstnFromNSM
 	}
 
 	return res.Attestation.Document, nil
@@ -154,59 +147,54 @@ func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 
 // verifyAttstn verifies the given attestation document and, if successful,
 // returns the document's auxiliary information.
-func (*nitroAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
-	errStr := "error verifying attestation document"
-	// Verify the remote enclave's attestation document before doing anything
-	// with it.
+func (*nitroAttester) verifyAttstn(doc []byte, ourNonce nonce) (auxInfo, error) {
+	// First, verify the remote enclave's attestation document.
 	opts := nitrite.VerifyOptions{CurrentTime: currentTime()}
 	their, err := nitrite.Verify(doc, opts)
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", errStr, err)
+		return nil, err
 	}
 
 	// Verify that the remote enclave's PCR values (e.g., the image ID) are
 	// identical to ours.
 	ourPCRs, err := getPCRValues()
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", errStr, err)
+		return nil, err
 	}
 	if !arePCRsIdentical(ourPCRs, their.Document.PCRs) {
 		elog.Printf("Our PCR values:\n%s", prettyFormat(ourPCRs))
 		elog.Printf("Their PCR values:\n%s", prettyFormat(their.Document.PCRs))
-		return nil, fmt.Errorf("%v: PCR values of remote enclave not identical to ours", errStr)
+		return nil, errPCRMismatch
 	}
 
 	// Verify that the remote enclave's attestation document contains the nonce
 	// that we asked it to embed.
-	b64Nonce := base64.StdEncoding.EncodeToString(their.Document.Nonce)
-	if n.B64() == b64Nonce {
-		return nil, fmt.Errorf("%v: nonce %s not in cache", errStr, b64Nonce)
+	theirNonce, err := sliceToNonce(their.Document.Nonce)
+	if err != nil {
+		return nil, err
+	}
+	if ourNonce != theirNonce {
+		return nil, errNonceMismatch
 	}
 
-	workersNonce, err := sliceToNonce(their.Document.Nonce)
-	if err != nil {
-		return nil, err
-	}
-	leadersNonce, err := sliceToNonce(their.Document.UserData)
-	if err != nil {
-		return nil, err
-	}
-	// If the "public key" field does not contain padding, we know that we're
-	// dealing with a worker's auxiliary information.
-	if !bytes.Equal(their.Document.PublicKey, padding) {
-		return &workerAuxInfo{
-			WorkersNonce: workersNonce,
-			LeadersNonce: leadersNonce,
-			PublicKey:    their.Document.PublicKey,
+	// If the "public key" field contains padding, we know that we're
+	// dealing with a leader's auxiliary information.
+	if bytes.Equal(their.Document.PublicKey, padding) {
+		elog.Println("Extracting leader's auxiliary information.")
+		return &leaderAuxInfo{
+			WorkersNonce:    theirNonce,
+			HashOfEncrypted: their.Document.UserData,
 		}, nil
 	}
 
-	workersNonce, err = sliceToNonce(their.Document.Nonce)
+	elog.Println("Extracting worker's auxiliary information.")
+	workersNonce, err := sliceToNonce(their.Document.UserData)
 	if err != nil {
 		return nil, err
 	}
-	return &leaderAuxInfo{
+	return &workerAuxInfo{
 		WorkersNonce: workersNonce,
-		EnclaveKeys:  their.Document.UserData,
+		LeadersNonce: theirNonce,
+		PublicKey:    their.Document.PublicKey,
 	}, nil
 }
