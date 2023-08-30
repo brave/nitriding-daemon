@@ -164,6 +164,8 @@ func (*nitroAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 		return nil, fmt.Errorf("%v: %w", errStr, err)
 	}
 	if !arePCRsIdentical(ourPCRs, their.Document.PCRs) {
+		elog.Printf("Our PCR values:\n%s", prettyFormat(ourPCRs))
+		elog.Printf("Their PCR values:\n%s", prettyFormat(their.Document.PCRs))
 		return nil, fmt.Errorf("%v: PCR values of remote enclave not identical to ours", errStr)
 	}
 

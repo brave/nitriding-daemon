@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -252,4 +253,12 @@ func makeLeaderRequest(leader *url.URL, ourNonce nonce, areWeLeader chan bool, e
 		return
 	}
 	errChan <- fmt.Errorf("leader designation endpoint returned %d", resp.StatusCode)
+}
+
+func prettyFormat(c any) string {
+	s, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(s)
 }
