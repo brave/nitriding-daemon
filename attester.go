@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,8 @@ import (
 	"github.com/hf/nsm"
 	"github.com/hf/nsm/request"
 )
+
+var padding = []byte("dummy")
 
 // attester defines functions for the creation and verification of attestation
 // documents.  Making this an interface helps with testing: It allows us to
@@ -106,7 +109,9 @@ func newNitroAttester() *nitroAttester {
 func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 	var nonce, userData, publicKey []byte
 
-	// Prepare our auxiliary information.
+	// Prepare our auxiliary information.  If the public key field is unused, we
+	// pad it with dummy bytes because the nitrite package (which we use to
+	// verify attestation documents) expects all three fields to be set.
 	switch v := aux.(type) {
 	case *workerAuxInfo:
 		nonce = v.WorkersNonce[:]
@@ -115,9 +120,11 @@ func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 	case *leaderAuxInfo:
 		nonce = v.WorkersNonce[:]
 		userData = v.EnclaveKeys
+		publicKey = padding
 	case *clientAuxInfo:
 		nonce = v.clientNonce[:]
 		userData = v.attestationHashes
+		publicKey = padding
 	}
 
 	s, err := nsm.OpenDefaultSession()
@@ -184,9 +191,9 @@ func (*nitroAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	// If the "public key" field is unset, we know that we're dealing with a
+	// If the "public key" field is padded, we know that we're dealing with a
 	// worker's auxiliary information.
-	if their.Document.PublicKey != nil {
+	if bytes.Equal(their.Document.PublicKey, padding) {
 		return &workerAuxInfo{
 			WorkersNonce: workersNonce,
 			LeadersNonce: leadersNonce,
