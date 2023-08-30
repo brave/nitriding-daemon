@@ -108,14 +108,14 @@ func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 
 	// Prepare our auxiliary information.
 	switch v := aux.(type) {
-	case workerAuxInfo:
+	case *workerAuxInfo:
 		nonce = v.WorkersNonce[:]
 		userData = v.LeadersNonce[:]
 		publicKey = v.PublicKey
-	case leaderAuxInfo:
+	case *leaderAuxInfo:
 		nonce = v.WorkersNonce[:]
 		userData = v.EnclaveKeys
-	case clientAuxInfo:
+	case *clientAuxInfo:
 		nonce = v.clientNonce[:]
 		userData = v.attestationHashes
 	}
