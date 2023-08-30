@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	maxAttDocLen  = 5000 // A (reasonable?) upper limit for attestation doc lengths.
+	maxAttDocLen  = 10000 // A (reasonable?) upper limit for attestation doc lengths.
 	hashPrefix    = "sha256:"
 	hashSeparator = ";"
 )
