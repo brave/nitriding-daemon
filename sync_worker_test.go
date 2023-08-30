@@ -41,7 +41,7 @@ func TestSuccessfulRegisterWith(t *testing.T) {
 		Host: "localhost",
 	}
 
-	err = asWorker(e.installKeys, &dummyAttester{}).registerWith(leader, worker)
+	err = asWorker(e.setupWorkerPostSync, &dummyAttester{}).registerWith(leader, worker)
 	if err != nil {
 		t.Fatalf("Error registering with leader: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestSuccessfulSync(t *testing.T) {
 	// Set up the worker.
 	worker := createEnclave(&defaultCfg)
 	srv := httptest.NewTLSServer(
-		asWorker(worker.installKeys, &dummyAttester{}),
+		asWorker(worker.setupWorkerPostSync, &dummyAttester{}),
 	)
 	workerURL, err := url.Parse(srv.URL)
 	if err != nil {

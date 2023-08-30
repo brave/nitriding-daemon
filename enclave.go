@@ -280,7 +280,7 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 
 	// Register external but private HTTP API.
 	m = e.extPrivSrv.Handler.(*chi.Mux)
-	m.Handle(pathSync, asWorker(e.installKeys, e.attester))
+	m.Handle(pathSync, asWorker(e.setupWorkerPostSync, e.attester))
 
 	// Register enclave-internal HTTP API.
 	m = e.intSrv.Handler.(*chi.Mux)
@@ -303,18 +303,6 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 	}
 
 	return e, nil
-}
-
-// installKeys installs the given enclave keys.  Worker enclaves do this after
-// key synchronization.
-func (e *Enclave) installKeys(keys *enclaveKeys) error {
-	e.keys.set(keys)
-	cert, err := tls.X509KeyPair(keys.NitridingCert, keys.NitridingKey)
-	if err != nil {
-		return err
-	}
-	e.httpsCert.set(&cert)
-	return nil
 }
 
 // Start starts the Nitro Enclave.  If something goes wrong, the function
@@ -362,11 +350,10 @@ func (e *Enclave) Start(ctx context.Context) error {
 	if !e.weAreLeader(ctx) {
 		elog.Println("Obtaining worker's hostname.")
 		worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
-		err = asWorker(e.installKeys, e.attester).registerWith(leader, worker)
+		err = asWorker(e.setupWorkerPostSync, e.attester).registerWith(leader, worker)
 		if err != nil {
 			elog.Fatalf("Error syncing with leader: %v", err)
 		}
-		go e.workerHeartbeat(ctx, worker)
 	}
 
 	return nil
@@ -419,6 +406,25 @@ func (e *Enclave) weAreLeader(ctx context.Context) (result bool) {
 	}
 }
 
+// setupWorkerPostSync performs necessary post-key synchronization tasks like
+// installing the given enclave keys and starting the heartbeat loop.
+func (e *Enclave) setupWorkerPostSync(keys *enclaveKeys) error {
+	e.keys.set(keys)
+	cert, err := tls.X509KeyPair(keys.NitridingCert, keys.NitridingKey)
+	if err != nil {
+		return err
+	}
+	e.httpsCert.set(&cert)
+
+	// Start our heartbeat.
+	worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
+	go e.workerHeartbeat(context.Background(), worker)
+
+	return nil
+}
+
+// setupLeader performs necessary setup tasks like starting the worker event
+// loop and installing leader-specific HTTP handlers.
 func (e *Enclave) setupLeader(ctx context.Context) {
 	go e.workers.start(ctx)
 	// Make leader-specific endpoints available.

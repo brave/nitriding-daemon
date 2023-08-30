@@ -27,19 +27,19 @@ var (
 // sync protocol requires two endpoints on the worker.
 type workerSync struct {
 	attester
-	installKeys   func(*enclaveKeys) error
+	setupWorker   func(*enclaveKeys) error
 	ephemeralKeys chan *boxKey
 	nonce         chan nonce
 }
 
 // asWorker returns a new workerSync object.
 func asWorker(
-	installKeys func(*enclaveKeys) error,
+	setupWorker func(*enclaveKeys) error,
 	a attester,
 ) *workerSync {
 	return &workerSync{
 		attester:      a,
-		installKeys:   installKeys,
+		setupWorker:   setupWorker,
 		nonce:         make(chan nonce, 1),
 		ephemeralKeys: make(chan *boxKey, 1),
 	}
@@ -209,7 +209,7 @@ func (s *workerSync) finishSync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := s.installKeys(&keys); err != nil {
+	if err := s.setupWorker(&keys); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		elog.Fatalf("Failed to install enclave keys: %v", err)
 	}
