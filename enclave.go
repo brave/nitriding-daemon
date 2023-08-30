@@ -405,6 +405,7 @@ func (e *Enclave) weAreLeader(ctx context.Context) (result bool) {
 		select {
 		case <-errChan:
 			elog.Println("Not yet able to talk to leader designation endpoint.")
+			time.Sleep(time.Second)
 			continue
 		case result = <-areWeLeader:
 			return
