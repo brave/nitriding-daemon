@@ -89,9 +89,14 @@ func getStateHandler(getSyncState func() int, keys *enclaveKeys) http.HandlerFun
 //
 // This is an enclave-internal endpoint that can only be accessed by the
 // trusted enclave application.
-func putStateHandler(e *Enclave) http.HandlerFunc {
+func putStateHandler(
+	a attester,
+	getSyncState func() int,
+	enclaveKeys *enclaveKeys,
+	workers *workerManager,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		switch e.getSyncState() {
+		switch getSyncState() {
 		case noSync:
 			fallthrough
 		case isWorker:
@@ -104,18 +109,18 @@ func putStateHandler(e *Enclave) http.HandlerFunc {
 				http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
 				return
 			}
-			e.keys.setAppKeys(keys)
+			enclaveKeys.setAppKeys(keys)
 			w.WriteHeader(http.StatusOK)
 
 			// The leader's application keys have changed.  Re-synchronize the key
 			// material with all registered workers.  If synchronization fails for a
 			// given worker, unregister it.
 			elog.Printf("Application keys have changed.  Re-synchronizing with %d worker(s).",
-				e.workers.length())
-			go e.workers.forAll(
+				workers.length())
+			go workers.forAll(
 				func(worker *url.URL) {
-					if err := asLeader(e.keys.get(), e.attester).syncWith(worker); err != nil {
-						e.workers.unregister(worker)
+					if err := asLeader(enclaveKeys.get(), a).syncWith(worker); err != nil {
+						workers.unregister(worker)
 					}
 				},
 			)

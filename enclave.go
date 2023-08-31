@@ -295,7 +295,7 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 	m = e.intSrv.Handler.(*chi.Mux)
 	m.Get(pathReady, readyHandler(e))
 	m.Get(pathState, getStateHandler(e.getSyncState, e.keys))
-	m.Put(pathState, putStateHandler(e))
+	m.Put(pathState, putStateHandler(e.attester, e.getSyncState, e.keys, e.workers))
 	m.Post(pathHash, hashHandler(e))
 
 	// Configure our reverse proxy if the enclave application exposes an HTTP
@@ -383,6 +383,7 @@ func (e *Enclave) setSyncState(state int) {
 	e.syncState = state
 }
 
+// weAreLeader figures out if the enclave is the leader or worker.
 func (e *Enclave) weAreLeader(ctx context.Context) (result bool) {
 	var (
 		err         error

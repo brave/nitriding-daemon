@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -30,11 +31,26 @@ func makeRequestFor(srv *http.Server) func(method, path string, body io.Reader) 
 	}
 }
 
+func makeReqForHandler(handler http.HandlerFunc) func(method, path string, body io.Reader) *http.Response {
+	return func(method, path string, body io.Reader) *http.Response {
+		req := httptest.NewRequest(method, path, body)
+		w := httptest.NewRecorder()
+		handler(w, req)
+		return w.Result()
+	}
+}
+
 // newResp is a helper function that creates an HTTP response.
 func newResp(status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status,
 		Body:       io.NopCloser(bytes.NewBufferString(body)),
+	}
+}
+
+func retState(state int) func() int {
+	return func() int {
+		return state
 	}
 }
 
@@ -110,36 +126,98 @@ func signalReady(t *testing.T, e *Enclave) {
 	time.Sleep(100 * time.Millisecond)
 }
 
-func TestStateHandlers(t *testing.T) {
-	e := createEnclave(&defaultCfg)
-	e.setupLeader(context.Background())
+func TestGetStateHandler(t *testing.T) {
+	var keys = newTestKeys(t)
 
-	tooLargeKey := make([]byte, 1024*1024+1)
-	makeReq := makeRequestFor(e.intSrv)
+	makeReq := makeReqForHandler(getStateHandler(retState(noSync), keys))
+	assertResponse(t,
+		makeReq(http.MethodGet, pathState, nil),
+		newResp(http.StatusGone, errEndpointGone.Error()),
+	)
+
+	makeReq = makeReqForHandler(getStateHandler(retState(isLeader), keys))
+	assertResponse(t,
+		makeReq(http.MethodGet, pathState, nil),
+		newResp(http.StatusGone, errEndpointGone.Error()),
+	)
+
+	makeReq = makeReqForHandler(getStateHandler(retState(isWorker), keys))
+	assertResponse(t,
+		makeReq(http.MethodGet, pathState, nil),
+		newResp(http.StatusOK, string(keys.getAppKeys())),
+	)
+
+	makeReq = makeReqForHandler(getStateHandler(retState(inProgress), keys))
+	assertResponse(t,
+		makeReq(http.MethodGet, pathState, nil),
+		newResp(http.StatusServiceUnavailable, errDesignationInProgress.Error()),
+	)
+}
+
+func TestPutStateHandler(t *testing.T) {
+	var (
+		tooLargeKey       = make([]byte, maxKeyMaterialLen+1)
+		almostTooLargeKey = make([]byte, maxKeyMaterialLen)
+		a                 = &dummyAttester{}
+		keys              = newTestKeys(t)
+		ctx, cancel       = context.WithCancel(context.Background())
+		workers           = newWorkerManager(time.Second)
+	)
+	go workers.start(ctx)
+	defer cancel()
+
+	makeReq := makeReqForHandler(putStateHandler(a, retState(noSync), keys, workers))
+	assertResponse(t,
+		makeReq(http.MethodPut, pathState, strings.NewReader("appKeys")),
+		newResp(http.StatusGone, errEndpointGone.Error()),
+	)
+
+	makeReq = makeReqForHandler(putStateHandler(a, retState(isWorker), keys, workers))
+	assertResponse(t,
+		makeReq(http.MethodPut, pathState, strings.NewReader("appKeys")),
+		newResp(http.StatusGone, errEndpointGone.Error()),
+	)
+
+	makeReq = makeReqForHandler(putStateHandler(a, retState(inProgress), keys, workers))
+	assertResponse(t,
+		makeReq(http.MethodPut, pathState, strings.NewReader("appKeys")),
+		newResp(http.StatusServiceUnavailable, errDesignationInProgress.Error()),
+	)
+
+	makeReq = makeReqForHandler(putStateHandler(a, retState(isLeader), keys, workers))
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, bytes.NewReader(tooLargeKey)),
 		newResp(http.StatusInternalServerError, errFailedReqBody.Error()),
 	)
-
-	// As long as we don't hit our (generous) upload limit, we always expect an
-	// HTTP 200 response.
-	almostTooLargeKey := make([]byte, 1024*1024)
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, bytes.NewReader(almostTooLargeKey)),
 		newResp(http.StatusOK, ""),
 	)
+}
 
-	// Subsequent calls to the endpoint overwrite the previous call.
-	expected := []byte("foobar")
+func TestGetPutStateHandlers(t *testing.T) {
+	var (
+		a           = &dummyAttester{}
+		keys        = newTestKeys(t)
+		appKeys     = "application keys"
+		ctx, cancel = context.WithCancel(context.Background())
+		workers     = newWorkerManager(time.Second)
+	)
+	go workers.start(ctx)
+	defer cancel()
+
+	// Set application state.
+	makeReq := makeReqForHandler(putStateHandler(a, retState(isLeader), keys, workers))
 	assertResponse(t,
-		makeReq(http.MethodPut, pathState, bytes.NewReader(expected)),
+		makeReq(http.MethodPut, pathState, strings.NewReader(appKeys)),
 		newResp(http.StatusOK, ""),
 	)
 
-	// Now retrieve the state and make sure that it's what we sent earlier.
+	// Retrieve previously-set application state.
+	makeReq = makeReqForHandler(getStateHandler(retState(isWorker), keys))
 	assertResponse(t,
 		makeReq(http.MethodGet, pathState, nil),
-		newResp(http.StatusOK, string(expected)),
+		newResp(http.StatusOK, appKeys),
 	)
 }
 
