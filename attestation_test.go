@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"net/http"
@@ -46,7 +45,7 @@ func TestAttestationHashes(t *testing.T) {
 
 	// Start the enclave.  This is going to initialize the hash over the HTTPS
 	// certificate.
-	if err := e.Start(context.Background()); err != nil {
+	if err := e.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer e.Stop() //nolint:errcheck

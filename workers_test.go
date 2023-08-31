@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net/url"
 	"sync"
 	"testing"
@@ -10,11 +9,11 @@ import (
 
 func TestWorkerRegistration(t *testing.T) {
 	var (
-		w           = newWorkerManager(time.Minute)
-		ctx, cancel = context.WithCancel(context.Background())
+		w    = newWorkerManager(time.Minute)
+		stop = make(chan struct{})
 	)
-	go w.start(ctx)
-	defer cancel()
+	go w.start(stop)
+	defer close(stop)
 
 	// Identical URLs are only tracked once.
 	worker1 := url.URL{Host: "foo"}
@@ -39,14 +38,14 @@ func TestWorkerRegistration(t *testing.T) {
 
 func TestForAll(t *testing.T) {
 	var (
-		w           = newWorkerManager(time.Millisecond)
-		ctx, cancel = context.WithCancel(context.Background())
-		wg          = sync.WaitGroup{}
-		mutex       = sync.Mutex{}
-		total       = 0
+		w     = newWorkerManager(time.Millisecond)
+		stop  = make(chan struct{})
+		wg    = sync.WaitGroup{}
+		mutex = sync.Mutex{}
+		total = 0
 	)
-	go w.start(ctx)
-	defer cancel()
+	go w.start(stop)
+	defer close(stop)
 
 	w.register(&url.URL{Host: "foo"})
 	w.register(&url.URL{Host: "bar"})
@@ -67,11 +66,11 @@ func TestForAll(t *testing.T) {
 
 func TestIneffectiveForAll(t *testing.T) {
 	var (
-		w           = newWorkerManager(time.Minute)
-		ctx, cancel = context.WithCancel(context.Background())
+		w    = newWorkerManager(time.Minute)
+		stop = make(chan struct{})
 	)
-	go w.start(ctx)
-	defer cancel()
+	go w.start(stop)
+	defer close(stop)
 
 	// Make sure that forAll finishes for an empty worker set.
 	w.forAll(func(_ *url.URL) {})

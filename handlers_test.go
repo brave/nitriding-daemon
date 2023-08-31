@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
@@ -159,11 +158,11 @@ func TestPutStateHandler(t *testing.T) {
 		almostTooLargeKey = make([]byte, maxKeyMaterialLen)
 		a                 = &dummyAttester{}
 		keys              = newTestKeys(t)
-		ctx, cancel       = context.WithCancel(context.Background())
+		stop              = make(chan struct{})
 		workers           = newWorkerManager(time.Second)
 	)
-	go workers.start(ctx)
-	defer cancel()
+	go workers.start(stop)
+	defer close(stop)
 
 	makeReq := makeReqToHandler(putStateHandler(a, retState(noSync), keys, workers))
 	assertResponse(t,
@@ -196,14 +195,14 @@ func TestPutStateHandler(t *testing.T) {
 
 func TestGetPutStateHandlers(t *testing.T) {
 	var (
-		a           = &dummyAttester{}
-		keys        = newTestKeys(t)
-		appKeys     = "application keys"
-		ctx, cancel = context.WithCancel(context.Background())
-		workers     = newWorkerManager(time.Second)
+		a       = &dummyAttester{}
+		keys    = newTestKeys(t)
+		appKeys = "application keys"
+		stop    = make(chan struct{})
+		workers = newWorkerManager(time.Second)
 	)
-	go workers.start(ctx)
-	defer cancel()
+	go workers.start(stop)
+	defer close(stop)
 
 	// Set application state.
 	makeReq := makeReqToHandler(putStateHandler(a, retState(isLeader), keys, workers))
@@ -235,12 +234,12 @@ func TestProxyHandler(t *testing.T) {
 
 	c := defaultCfg
 	c.AppWebSrv = u
-	e, err := NewEnclave(context.Background(), &c)
+	e, err := NewEnclave(&c)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.revProxy = httputil.NewSingleHostReverseProxy(u)
-	if err := e.Start(context.Background()); err != nil {
+	if err := e.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer e.Stop() //nolint:errcheck
@@ -314,7 +313,7 @@ func TestReadiness(t *testing.T) {
 	cfg := defaultCfg
 	cfg.WaitForApp = false
 	e := createEnclave(&cfg)
-	if err := e.Start(context.Background()); err != nil {
+	if err := e.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer e.Stop() //nolint:errcheck
@@ -350,7 +349,7 @@ func TestReadyHandler(t *testing.T) {
 	cfg := defaultCfg
 	cfg.WaitForApp = true
 	e := createEnclave(&cfg)
-	if err := e.Start(context.Background()); err != nil {
+	if err := e.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer e.Stop() //nolint:errcheck
@@ -430,7 +429,7 @@ func TestHeartbeatHandler(t *testing.T) {
 		keys    = newTestKeys(t)
 		makeReq = makeReqToSrv(e.extPrivSrv)
 	)
-	e.setupLeader(context.Background())
+	e.setupLeader()
 	e.keys.set(keys)
 
 	tooLargeBuf := bytes.NewBuffer(make([]byte, maxHeartbeatBody+1))
@@ -460,10 +459,10 @@ func TestHeartbeatHandlerWithSync(t *testing.T) {
 		workerSrv = httptest.NewTLSServer(worker)
 	)
 	defer workerSrv.Close()
-	if err := leaderEnclave.Start(context.Background()); err != nil {
+	if err := leaderEnclave.Start(); err != nil {
 		t.Fatal(err)
 	}
-	leaderEnclave.setupLeader(context.Background())
+	leaderEnclave.setupLeader()
 	wg.Add(1)
 
 	// Mock two functions to make the leader enclave talk to our test server.

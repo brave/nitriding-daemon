@@ -217,7 +217,7 @@ func (c *Config) String() string {
 }
 
 // NewEnclave creates and returns a new enclave with the given config.
-func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
+func NewEnclave(cfg *Config) (*Enclave, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("failed to create enclave: %w", err)
 	}
@@ -315,7 +315,7 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 
 // Start starts the Nitro Enclave.  If something goes wrong, the function
 // returns an error.
-func (e *Enclave) Start(ctx context.Context) error {
+func (e *Enclave) Start() error {
 	var (
 		err    error
 		leader = e.getLeader(pathHeartbeat)
@@ -355,7 +355,7 @@ func (e *Enclave) Start(ctx context.Context) error {
 	}
 
 	// Check if we are the leader.
-	if !e.weAreLeader(ctx) {
+	if !e.weAreLeader() {
 		elog.Println("Obtaining worker's hostname.")
 		worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
 		err = asWorker(e.setupWorkerPostSync, e.attester).registerWith(leader, worker)
@@ -382,7 +382,7 @@ func (e *Enclave) setSyncState(state int) {
 }
 
 // weAreLeader figures out if the enclave is the leader or worker.
-func (e *Enclave) weAreLeader(ctx context.Context) (result bool) {
+func (e *Enclave) weAreLeader() (result bool) {
 	var (
 		err         error
 		ourNonce    nonce
@@ -418,6 +418,8 @@ func (e *Enclave) weAreLeader(ctx context.Context) (result bool) {
 	for {
 		go makeLeaderRequest(leader, ourNonce, areWeLeader, errChan)
 		select {
+		case <-e.stop:
+			return
 		case <-errChan:
 			elog.Println("Not yet able to talk to leader designation endpoint.")
 			time.Sleep(time.Second)
@@ -425,7 +427,7 @@ func (e *Enclave) weAreLeader(ctx context.Context) (result bool) {
 		case result = <-areWeLeader:
 			return
 		case <-weAreLeader:
-			e.setupLeader(ctx)
+			e.setupLeader()
 			result = true
 			return
 		case <-timeout.C:
@@ -446,15 +448,15 @@ func (e *Enclave) setupWorkerPostSync(keys *enclaveKeys) error {
 
 	// Start our heartbeat.
 	worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
-	go e.workerHeartbeat(context.Background(), worker)
+	go e.workerHeartbeat(worker)
 
 	return nil
 }
 
 // setupLeader performs necessary setup tasks like starting the worker event
 // loop and installing leader-specific HTTP handlers.
-func (e *Enclave) setupLeader(ctx context.Context) {
-	go e.workers.start(ctx)
+func (e *Enclave) setupLeader() {
+	go e.workers.start(e.stop)
 	// Make leader-specific endpoint available.
 	e.extPrivSrv.Handler.(*chi.Mux).Post(pathHeartbeat, heartbeatHandler(e))
 	elog.Println("Set up leader endpoint and started worker event loop.")
@@ -464,7 +466,7 @@ func (e *Enclave) setupLeader(ctx context.Context) {
 // know that we're still alive, and 2) to compare key material.  If it turns out
 // that the leader has different key material than the worker, the worker
 // re-registers itself, which triggers key re-synchronization.
-func (e *Enclave) workerHeartbeat(ctx context.Context, worker *url.URL) {
+func (e *Enclave) workerHeartbeat(worker *url.URL) {
 	elog.Println("Starting worker's heartbeat loop.")
 	defer elog.Println("Exiting worker's heartbeat loop.")
 	var (
@@ -477,7 +479,7 @@ func (e *Enclave) workerHeartbeat(ctx context.Context, worker *url.URL) {
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-e.stop:
 			return
 		case <-timer.C:
 			hbBody.HashedKeys = e.keys.hashAndB64()

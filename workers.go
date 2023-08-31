@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net/url"
 	"time"
 )
@@ -29,7 +28,7 @@ func newWorkerManager(timeout time.Duration) *workerManager {
 }
 
 // start starts the worker manager's event loop.
-func (w *workerManager) start(ctx context.Context) {
+func (w *workerManager) start(stop chan struct{}) {
 	var (
 		set   = make(workers)
 		timer = time.NewTicker(w.timeout)
@@ -39,7 +38,7 @@ func (w *workerManager) start(ctx context.Context) {
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-stop:
 			return
 
 		case <-timer.C:

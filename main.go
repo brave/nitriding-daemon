@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"flag"
 	"io"
@@ -134,13 +133,12 @@ func main() {
 		elog.Println("WARNING: Using debug mode, which must not be enabled in production!")
 	}
 
-	ctx := context.Background()
-	enclave, err := NewEnclave(ctx, c)
+	enclave, err := NewEnclave(c)
 	if err != nil {
 		elog.Fatalf("Failed to create enclave: %v", err)
 	}
 
-	if err := enclave.Start(ctx); err != nil {
+	if err := enclave.Start(); err != nil {
 		elog.Fatalf("Enclave terminated: %v", err)
 	}
 
