@@ -25,9 +25,11 @@ const (
 )
 
 var (
-	errFailedReqBody = errors.New("failed to read request body")
-	errHashWrongSize = errors.New("given hash is of invalid size")
-	errNoBase64      = errors.New("no Base64 given")
+	errFailedReqBody         = errors.New("failed to read request body")
+	errHashWrongSize         = errors.New("given hash is of invalid size")
+	errNoBase64              = errors.New("no Base64 given")
+	errDesignationInProgress = errors.New("leader designation in progress")
+	errEndpointGone          = errors.New("endpoint not meant to be used")
 )
 
 func errNo200(code int) error {
@@ -57,19 +59,26 @@ func rootHandler(cfg *Config) http.HandlerFunc {
 //
 // This is an enclave-internal endpoint that can only be accessed by the
 // trusted enclave application.
-func getStateHandler(e *Enclave) http.HandlerFunc {
+func getStateHandler(getSyncState func() int, keys *enclaveKeys) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		appKeys := e.keys.getAppKeys()
-		n, err := w.Write(appKeys)
-		if err != nil {
-			elog.Printf("Error writing state to client: %v", err)
-			return
-		}
-		expected := len(appKeys)
-		if n != expected {
-			elog.Printf("Only wrote %d out of %d-byte state to client.", n, expected)
-			return
+		switch getSyncState() {
+		case noSync:
+			fallthrough
+		case isLeader:
+			http.Error(w, errEndpointGone.Error(), http.StatusGone)
+		case inProgress:
+			http.Error(w, errDesignationInProgress.Error(), http.StatusServiceUnavailable)
+		case isWorker:
+			w.Header().Set("Content-Type", "application/octet-stream")
+			appKeys := keys.getAppKeys()
+			n, err := w.Write(appKeys)
+			if err != nil {
+				elog.Fatalf("Error writing state to client: %v", err)
+			}
+			expected := len(appKeys)
+			if n != expected {
+				elog.Fatalf("Only wrote %d out of %d-byte state to client.", n, expected)
+			}
 		}
 	}
 }
@@ -82,26 +91,35 @@ func getStateHandler(e *Enclave) http.HandlerFunc {
 // trusted enclave application.
 func putStateHandler(e *Enclave) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		keys, err := io.ReadAll(newLimitReader(r.Body, maxKeyMaterialLen))
-		if err != nil {
-			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
-			return
-		}
-		e.keys.setAppKeys(keys)
-		w.WriteHeader(http.StatusOK)
+		switch e.getSyncState() {
+		case noSync:
+			fallthrough
+		case isWorker:
+			http.Error(w, errEndpointGone.Error(), http.StatusGone)
+		case inProgress:
+			http.Error(w, errDesignationInProgress.Error(), http.StatusServiceUnavailable)
+		case isLeader:
+			keys, err := io.ReadAll(newLimitReader(r.Body, maxKeyMaterialLen))
+			if err != nil {
+				http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
+				return
+			}
+			e.keys.setAppKeys(keys)
+			w.WriteHeader(http.StatusOK)
 
-		// The leader's application keys have changed.  Re-synchronize the key
-		// material with all registered workers.  If synchronization fails for a
-		// given worker, unregister it.
-		elog.Printf("Application keys have changed.  Re-synchronizing with %d worker(s).",
-			e.workers.length())
-		go e.workers.forAll(
-			func(worker *url.URL) {
-				if err := asLeader(e.keys.get(), e.attester).syncWith(worker); err != nil {
-					e.workers.unregister(worker)
-				}
-			},
-		)
+			// The leader's application keys have changed.  Re-synchronize the key
+			// material with all registered workers.  If synchronization fails for a
+			// given worker, unregister it.
+			elog.Printf("Application keys have changed.  Re-synchronizing with %d worker(s).",
+				e.workers.length())
+			go e.workers.forAll(
+				func(worker *url.URL) {
+					if err := asLeader(e.keys.get(), e.attester).syncWith(worker); err != nil {
+						e.workers.unregister(worker)
+					}
+				},
+			)
+		}
 	}
 }
 

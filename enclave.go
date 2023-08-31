@@ -52,6 +52,12 @@ const (
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
+	// The states the enclave can be in relating to key synchronization.
+	noSync     = 0 // The enclave is not configured to synchronize keys.
+	inProgress = 1 // Leader designation is in progress.
+	isLeader   = 2 // The enclave is the leader.
+	isWorker   = 3 // The enclave is a worker.
+
 )
 
 var (
@@ -68,6 +74,7 @@ type Enclave struct {
 	extPubSrv, extPrivSrv *http.Server
 	intSrv                *http.Server
 	promSrv               *http.Server
+	syncState             int
 	revProxy              *httputil.ReverseProxy
 	hashes                *AttestationHashes
 	promRegistry          *prometheus.Registry
@@ -270,6 +277,9 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 	if cfg.DisableKeepAlives {
 		e.extPubSrv.SetKeepAlivesEnabled(false)
 	}
+	if cfg.isScalingEnabled() {
+		e.setSyncState(inProgress)
+	}
 
 	// Register external public HTTP API.
 	m := e.extPubSrv.Handler.(*chi.Mux)
@@ -284,7 +294,8 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 	// Register enclave-internal HTTP API.
 	m = e.intSrv.Handler.(*chi.Mux)
 	m.Get(pathReady, readyHandler(e))
-	m.Get(pathState, getStateHandler(e))
+	m.Get(pathState, getStateHandler(e.getSyncState, e.keys))
+	m.Put(pathState, putStateHandler(e))
 	m.Post(pathHash, hashHandler(e))
 
 	// Configure our reverse proxy if the enclave application exposes an HTTP
@@ -358,6 +369,20 @@ func (e *Enclave) Start(ctx context.Context) error {
 	return nil
 }
 
+// getSyncState returns the enclave's key synchronization state.
+func (e *Enclave) getSyncState() int {
+	e.RLock()
+	defer e.RUnlock()
+	return e.syncState
+}
+
+// setSyncState sets the enclave's key synchronization state.
+func (e *Enclave) setSyncState(state int) {
+	e.Lock()
+	defer e.Unlock()
+	e.syncState = state
+}
+
 func (e *Enclave) weAreLeader(ctx context.Context) (result bool) {
 	var (
 		err         error
@@ -369,6 +394,11 @@ func (e *Enclave) weAreLeader(ctx context.Context) (result bool) {
 	)
 	defer func() {
 		elog.Printf("We are leader: %v", result)
+		if result {
+			e.setSyncState(isLeader)
+		} else {
+			e.setSyncState(isWorker)
+		}
 	}()
 
 	ourNonce, err = newNonce()
@@ -426,10 +456,9 @@ func (e *Enclave) setupWorkerPostSync(keys *enclaveKeys) error {
 // loop and installing leader-specific HTTP handlers.
 func (e *Enclave) setupLeader(ctx context.Context) {
 	go e.workers.start(ctx)
-	// Make leader-specific endpoints available.
-	e.intSrv.Handler.(*chi.Mux).Put(pathState, putStateHandler(e))
+	// Make leader-specific endpoint available.
 	e.extPrivSrv.Handler.(*chi.Mux).Post(pathHeartbeat, heartbeatHandler(e))
-	elog.Println("Set up leader endpoints and started worker event loop.")
+	elog.Println("Set up leader endpoint and started worker event loop.")
 }
 
 // workerHeartbeat periodically talks to the leader enclave to 1) let the leader
