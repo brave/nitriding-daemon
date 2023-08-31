@@ -40,7 +40,6 @@ const (
 	parentCID = 3
 	// The following paths are handled by nitriding.
 	pathRoot        = "/enclave"
-	pathNonce       = "/enclave/nonce"
 	pathAttestation = "/enclave/attestation"
 	pathState       = "/enclave/state"
 	pathSync        = "/enclave/sync"
