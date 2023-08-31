@@ -491,3 +491,33 @@ func TestHeartbeatHandlerWithSync(t *testing.T) {
 	wg.Wait()
 	assertEqual(t, leaderEnclave.keys.equal(workerKeys), true)
 }
+
+func TestGetLeaderHandler(t *testing.T) {
+	var (
+		weAreLeader      = make(chan struct{})
+		unexpectedSuffix = "?nonce=0000000000000000000000000000000000000000"
+	)
+	nonce, err := newNonce()
+	failOnErr(t, err)
+
+	// Don't provide the expected nonce.
+	makeReq := makeReqToHandler(getLeaderHandler(nonce, weAreLeader))
+	assertResponse(t,
+		makeReq(http.MethodGet, pathLeader, nil),
+		newResp(http.StatusBadRequest, errNoNonce.Error()),
+	)
+
+	// Send an unexpected nonce.
+	assertResponse(t,
+		makeReq(http.MethodGet, pathLeader+unexpectedSuffix, nil),
+		newResp(http.StatusOK, ""),
+	)
+
+	// Send the expected nonce.
+	go func() { <-weAreLeader }()
+	suffix := fmt.Sprintf("?nonce=%x", nonce)
+	assertResponse(t,
+		makeReq(http.MethodGet, pathLeader+suffix, nil),
+		newResp(http.StatusOK, ""),
+	)
+}
