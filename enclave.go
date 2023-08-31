@@ -69,7 +69,6 @@ var (
 type Enclave struct {
 	sync.RWMutex
 	attester
-	ctx                   context.Context
 	cfg                   *Config
 	extPubSrv, extPrivSrv *http.Server
 	intSrv                *http.Server
@@ -226,7 +225,6 @@ func NewEnclave(ctx context.Context, cfg *Config) (*Enclave, error) {
 	reg := prometheus.NewRegistry()
 	e := &Enclave{
 		attester: &nitroAttester{},
-		ctx:      ctx,
 		cfg:      cfg,
 		extPubSrv: &http.Server{
 			Handler: chi.NewRouter(),
