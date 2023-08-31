@@ -21,8 +21,7 @@ import (
 	"time"
 )
 
-// makeRequestFor is a helper function that creates an HTTP request.
-func makeRequestFor(srv *http.Server) func(method, path string, body io.Reader) *http.Response {
+func makeReqToSrv(srv *http.Server) func(method, path string, body io.Reader) *http.Response {
 	return func(method, path string, body io.Reader) *http.Response {
 		req := httptest.NewRequest(method, path, body)
 		rec := httptest.NewRecorder()
@@ -31,7 +30,7 @@ func makeRequestFor(srv *http.Server) func(method, path string, body io.Reader) 
 	}
 }
 
-func makeReqForHandler(handler http.HandlerFunc) func(method, path string, body io.Reader) *http.Response {
+func makeReqToHandler(handler http.HandlerFunc) func(method, path string, body io.Reader) *http.Response {
 	return func(method, path string, body io.Reader) *http.Response {
 		req := httptest.NewRequest(method, path, body)
 		w := httptest.NewRecorder()
@@ -100,7 +99,7 @@ func assertResponse(t *testing.T, actual, expected *http.Response) {
 }
 
 func TestRootHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).extPubSrv)
+	makeReq := makeReqToSrv(createEnclave(&defaultCfg).extPubSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathRoot, nil),
@@ -112,7 +111,7 @@ func TestRootHandler(t *testing.T) {
 // instructing it to spin up its Internet-facing Web server.
 func signalReady(t *testing.T, e *Enclave) {
 	t.Helper()
-	makeReq := makeRequestFor(e.intSrv)
+	makeReq := makeReqToSrv(e.intSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathReady, nil),
@@ -129,25 +128,25 @@ func signalReady(t *testing.T, e *Enclave) {
 func TestGetStateHandler(t *testing.T) {
 	var keys = newTestKeys(t)
 
-	makeReq := makeReqForHandler(getStateHandler(retState(noSync), keys))
+	makeReq := makeReqToHandler(getStateHandler(retState(noSync), keys))
 	assertResponse(t,
 		makeReq(http.MethodGet, pathState, nil),
 		newResp(http.StatusGone, errEndpointGone.Error()),
 	)
 
-	makeReq = makeReqForHandler(getStateHandler(retState(isLeader), keys))
+	makeReq = makeReqToHandler(getStateHandler(retState(isLeader), keys))
 	assertResponse(t,
 		makeReq(http.MethodGet, pathState, nil),
 		newResp(http.StatusGone, errEndpointGone.Error()),
 	)
 
-	makeReq = makeReqForHandler(getStateHandler(retState(isWorker), keys))
+	makeReq = makeReqToHandler(getStateHandler(retState(isWorker), keys))
 	assertResponse(t,
 		makeReq(http.MethodGet, pathState, nil),
 		newResp(http.StatusOK, string(keys.getAppKeys())),
 	)
 
-	makeReq = makeReqForHandler(getStateHandler(retState(inProgress), keys))
+	makeReq = makeReqToHandler(getStateHandler(retState(inProgress), keys))
 	assertResponse(t,
 		makeReq(http.MethodGet, pathState, nil),
 		newResp(http.StatusServiceUnavailable, errDesignationInProgress.Error()),
@@ -166,25 +165,25 @@ func TestPutStateHandler(t *testing.T) {
 	go workers.start(ctx)
 	defer cancel()
 
-	makeReq := makeReqForHandler(putStateHandler(a, retState(noSync), keys, workers))
+	makeReq := makeReqToHandler(putStateHandler(a, retState(noSync), keys, workers))
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, strings.NewReader("appKeys")),
 		newResp(http.StatusGone, errEndpointGone.Error()),
 	)
 
-	makeReq = makeReqForHandler(putStateHandler(a, retState(isWorker), keys, workers))
+	makeReq = makeReqToHandler(putStateHandler(a, retState(isWorker), keys, workers))
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, strings.NewReader("appKeys")),
 		newResp(http.StatusGone, errEndpointGone.Error()),
 	)
 
-	makeReq = makeReqForHandler(putStateHandler(a, retState(inProgress), keys, workers))
+	makeReq = makeReqToHandler(putStateHandler(a, retState(inProgress), keys, workers))
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, strings.NewReader("appKeys")),
 		newResp(http.StatusServiceUnavailable, errDesignationInProgress.Error()),
 	)
 
-	makeReq = makeReqForHandler(putStateHandler(a, retState(isLeader), keys, workers))
+	makeReq = makeReqToHandler(putStateHandler(a, retState(isLeader), keys, workers))
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, bytes.NewReader(tooLargeKey)),
 		newResp(http.StatusInternalServerError, errFailedReqBody.Error()),
@@ -207,14 +206,14 @@ func TestGetPutStateHandlers(t *testing.T) {
 	defer cancel()
 
 	// Set application state.
-	makeReq := makeReqForHandler(putStateHandler(a, retState(isLeader), keys, workers))
+	makeReq := makeReqToHandler(putStateHandler(a, retState(isLeader), keys, workers))
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, strings.NewReader(appKeys)),
 		newResp(http.StatusOK, ""),
 	)
 
 	// Retrieve previously-set application state.
-	makeReq = makeReqForHandler(getStateHandler(retState(isWorker), keys))
+	makeReq = makeReqToHandler(getStateHandler(retState(isWorker), keys))
 	assertResponse(t,
 		makeReq(http.MethodGet, pathState, nil),
 		newResp(http.StatusOK, appKeys),
@@ -272,7 +271,7 @@ func TestHashHandler(t *testing.T) {
 	validHash := [sha256.Size]byte{}
 	validHashB64 := base64.StdEncoding.EncodeToString(validHash[:])
 	e := createEnclave(&defaultCfg)
-	makeReq := makeRequestFor(e.intSrv)
+	makeReq := makeReqToSrv(e.intSrv)
 
 	// Send invalid Base64.
 	assertResponse(t,
@@ -377,7 +376,7 @@ func TestReadyHandler(t *testing.T) {
 func TestAttestationHandlerWhileProfiling(t *testing.T) {
 	cfg := defaultCfg
 	cfg.UseProfiling = true
-	makeReq := makeRequestFor(createEnclave(&cfg).extPubSrv)
+	makeReq := makeReqToSrv(createEnclave(&cfg).extPubSrv)
 
 	// Ensure that the attestation handler aborts if profiling is enabled.
 	assertResponse(t,
@@ -389,7 +388,7 @@ func TestAttestationHandlerWhileProfiling(t *testing.T) {
 func TestAttestationHandler(t *testing.T) {
 	prodCfg := defaultCfg
 	prodCfg.Debug = false
-	makeReq := makeRequestFor(createEnclave(&prodCfg).extPubSrv)
+	makeReq := makeReqToSrv(createEnclave(&prodCfg).extPubSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodPost, pathAttestation, nil),
@@ -417,7 +416,7 @@ func TestAttestationHandler(t *testing.T) {
 }
 
 func TestConfigHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).extPubSrv)
+	makeReq := makeReqToSrv(createEnclave(&defaultCfg).extPubSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathConfig, nil),
@@ -429,7 +428,7 @@ func TestHeartbeatHandler(t *testing.T) {
 	var (
 		e       = createEnclave(&defaultCfg)
 		keys    = newTestKeys(t)
-		makeReq = makeRequestFor(e.extPrivSrv)
+		makeReq = makeReqToSrv(e.extPrivSrv)
 	)
 	e.setupLeader(context.Background())
 	e.keys.set(keys)
@@ -450,7 +449,7 @@ func TestHeartbeatHandlerWithSync(t *testing.T) {
 	var (
 		wg            = sync.WaitGroup{}
 		leaderEnclave = createEnclave(&defaultCfg)
-		makeReq       = makeRequestFor(leaderEnclave.extPrivSrv)
+		makeReq       = makeReqToSrv(leaderEnclave.extPrivSrv)
 		workerKeys    = newTestKeys(t)
 		setWorkerKeys = func(keys *enclaveKeys) error {
 			defer wg.Done()
