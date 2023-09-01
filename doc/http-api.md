@@ -71,7 +71,7 @@
   This endpoint allows an application to retrieve state
   (e.g., confidential key material) that was previously set by the "leader" application.
   If synchronization is not enabled via the `-fqdn-leader` command line
-  argument, the endpoint responds with status code `410`.
+  argument, the endpoint responds with status code `403`.
   If synchronization is enabled but leader designation is currently in progress,
   the endpoint responds with status code `503`.
   If synchronization is enabled and the enclave is the leader,
@@ -84,7 +84,7 @@
   This endpoint allows the "leader" application to set state that is
   subsequently synchronized with worker enclaves.
   If synchronization is not enabled via the `-fqdn-leader` command line
-  argument, the endpoint responds with status code `410`.
+  argument, the endpoint responds with status code `403`.
   If synchronization is enabled but leader designation is currently in progress,
   the endpoint responds with status code `503`.
   If synchronization is enabled and the enclave is a worker,

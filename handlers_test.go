@@ -130,7 +130,7 @@ func TestGetStateHandler(t *testing.T) {
 	makeReq := makeReqToHandler(getStateHandler(retState(noSync), keys))
 	assertResponse(t,
 		makeReq(http.MethodGet, pathState, nil),
-		newResp(http.StatusGone, errEndpointGone.Error()),
+		newResp(http.StatusForbidden, errKeySyncDisabled.Error()),
 	)
 
 	makeReq = makeReqToHandler(getStateHandler(retState(isLeader), keys))
@@ -167,7 +167,7 @@ func TestPutStateHandler(t *testing.T) {
 	makeReq := makeReqToHandler(putStateHandler(a, retState(noSync), keys, workers))
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, strings.NewReader("appKeys")),
-		newResp(http.StatusGone, errEndpointGone.Error()),
+		newResp(http.StatusForbidden, errKeySyncDisabled.Error()),
 	)
 
 	makeReq = makeReqToHandler(putStateHandler(a, retState(isWorker), keys, workers))

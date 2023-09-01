@@ -30,6 +30,7 @@ var (
 	errNoBase64              = errors.New("no Base64 given")
 	errDesignationInProgress = errors.New("leader designation in progress")
 	errEndpointGone          = errors.New("endpoint not meant to be used")
+	errKeySyncDisabled       = errors.New("key synchronization is disabled")
 )
 
 func errNo200(code int) error {
@@ -63,7 +64,7 @@ func getStateHandler(getSyncState func() int, keys *enclaveKeys) http.HandlerFun
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch getSyncState() {
 		case noSync:
-			fallthrough
+			http.Error(w, errKeySyncDisabled.Error(), http.StatusForbidden)
 		case isLeader:
 			http.Error(w, errEndpointGone.Error(), http.StatusGone)
 		case inProgress:
@@ -98,7 +99,7 @@ func putStateHandler(
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch getSyncState() {
 		case noSync:
-			fallthrough
+			http.Error(w, errKeySyncDisabled.Error(), http.StatusForbidden)
 		case isWorker:
 			http.Error(w, errEndpointGone.Error(), http.StatusGone)
 		case inProgress:
