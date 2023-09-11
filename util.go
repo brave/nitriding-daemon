@@ -48,10 +48,10 @@ var _getSyncURL = func(host string, port uint16) *url.URL {
 	}
 }
 
-// newUnauthenticatedHTTPClient returns an HTTP client that skips HTTPS
+// _newUnauthenticatedHTTPClient returns an HTTP client that skips HTTPS
 // certificate validation.  In the context of nitriding, this is fine because
-// all we need is a *confidential* channel, and not an authenticated channel.
-// Authentication is handled via attestation documents.
+// all we need is a *confidential* channel; not an authenticated channel.
+// Authentication is handled on the next layer, using attestation documents.
 func _newUnauthenticatedHTTPClient() *http.Client {
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
