@@ -55,7 +55,7 @@ func TestGetKeys(t *testing.T) {
 	var (
 		testKeys = newTestKeys(t)
 		appKeys  = testKeys.getAppKeys()
-		keys     = testKeys.get()
+		keys     = testKeys.copy()
 	)
 
 	// Ensure that the application key is retrieved correctly.
@@ -72,7 +72,7 @@ func TestGetKeys(t *testing.T) {
 func TestModifyCloneObject(t *testing.T) {
 	var (
 		keys       = newTestKeys(t)
-		clonedKeys = keys.get()
+		clonedKeys = keys.copy()
 	)
 
 	// Make sure that setting the clone's application keys does not affect the

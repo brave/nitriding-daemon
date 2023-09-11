@@ -97,7 +97,7 @@ func (s *leaderSync) syncWith(worker *url.URL) (err error) {
 	// that the worker put into its auxiliary information.
 	pubKey := &[boxKeyLen]byte{}
 	copy(pubKey[:], workerAux.PublicKey[:])
-	jsonKeys, err := json.Marshal(s.keys.get())
+	jsonKeys, err := json.Marshal(s.keys.copy())
 	if err != nil {
 		return err
 	}

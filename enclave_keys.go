@@ -14,17 +14,17 @@ import (
 // implements getters and setters that allow for thread-safe setting and getting
 // of members.
 type enclaveKeys struct {
-	sync.RWMutex
+	sync.Mutex
 	NitridingKey  []byte `json:"nitriding_key"`
 	NitridingCert []byte `json:"nitriding_cert"`
 	AppKeys       []byte `json:"app_keys"`
 }
 
 func (e1 *enclaveKeys) equal(e2 *enclaveKeys) bool {
-	e1.RLock()
-	e2.RLock()
-	defer e1.RUnlock()
-	defer e2.RUnlock()
+	e1.Lock()
+	e2.Lock()
+	defer e1.Unlock()
+	defer e2.Unlock()
 
 	return bytes.Equal(e1.NitridingCert, e2.NitridingCert) &&
 		bytes.Equal(e1.NitridingKey, e2.NitridingKey) &&
@@ -47,17 +47,13 @@ func (e *enclaveKeys) setNitridingKeys(key, cert []byte) {
 }
 
 func (e *enclaveKeys) set(newKeys *enclaveKeys) {
-	e.Lock()
-	defer e.Unlock()
-
-	e.NitridingKey = newKeys.NitridingKey
-	e.NitridingCert = newKeys.NitridingCert
-	e.AppKeys = newKeys.AppKeys
+	e.setAppKeys(newKeys.AppKeys)
+	e.setNitridingKeys(newKeys.NitridingKey, newKeys.NitridingCert)
 }
 
-func (e *enclaveKeys) get() *enclaveKeys {
-	e.RLock()
-	defer e.RUnlock()
+func (e *enclaveKeys) copy() *enclaveKeys {
+	e.Lock()
+	defer e.Unlock()
 
 	return &enclaveKeys{
 		NitridingKey:  e.NitridingKey,
@@ -67,8 +63,8 @@ func (e *enclaveKeys) get() *enclaveKeys {
 }
 
 func (e *enclaveKeys) getAppKeys() []byte {
-	e.RLock()
-	defer e.RUnlock()
+	e.Lock()
+	defer e.Unlock()
 
 	return e.AppKeys
 }
@@ -77,6 +73,9 @@ func (e *enclaveKeys) getAppKeys() []byte {
 // resulting string is not confidential as it's impractical to reverse the key
 // material.
 func (e *enclaveKeys) hashAndB64() string {
+	e.Lock()
+	defer e.Unlock()
+
 	keys := append(append(e.NitridingCert, e.NitridingKey...), e.AppKeys...)
 	hash := sha256.Sum256(keys)
 	return base64.StdEncoding.EncodeToString(hash[:])
