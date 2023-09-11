@@ -289,7 +289,9 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 
 	// Register enclave-internal HTTP API.
 	m = e.intSrv.Handler.(*chi.Mux)
-	m.Get(pathReady, readyHandler(e))
+	if cfg.WaitForApp {
+		m.Get(pathReady, readyHandler(e.ready))
+	}
 	m.Get(pathState, getStateHandler(e.getSyncState, e.keys))
 	m.Put(pathState, putStateHandler(e.attester, e.getSyncState, e.keys, e.workers))
 	m.Post(pathHash, hashHandler(e))
