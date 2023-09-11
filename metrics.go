@@ -18,10 +18,22 @@ const (
 	notAvailable = "n/a"
 )
 
+var (
+	goodHb = prometheus.Labels{
+		respErr: notAvailable,
+	}
+	badHb = func(err error) prometheus.Labels {
+		return prometheus.Labels{
+			respErr: err.Error(),
+		}
+	}
+)
+
 // metrics contains our Prometheus metrics.
 type metrics struct {
 	reqs        *prometheus.CounterVec
 	proxiedReqs *prometheus.CounterVec
+	heartbeats  *prometheus.CounterVec
 }
 
 // newMetrics initializes our Prometheus metrics.
@@ -43,6 +55,14 @@ func newMetrics(reg prometheus.Registerer, namespace string) *metrics {
 				Help:      "HTTP requests proxied to the enclave application",
 			},
 			[]string{reqPath, reqMethod, respStatus, respErr},
+		),
+		heartbeats: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "heartbeats",
+				Help:      "Heartbeats sent to the leader enclave",
+			},
+			[]string{respErr},
 		),
 	}
 	reg.MustRegister(m.proxiedReqs)

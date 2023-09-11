@@ -486,6 +486,7 @@ func (e *Enclave) workerHeartbeat(worker *url.URL) {
 			body, err := json.Marshal(hbBody)
 			if err != nil {
 				elog.Printf("Error marshalling heartbeat request: %v", err)
+				e.metrics.heartbeats.With(badHb(err)).Inc()
 				continue
 			}
 
@@ -496,13 +497,16 @@ func (e *Enclave) workerHeartbeat(worker *url.URL) {
 			)
 			if err != nil {
 				elog.Printf("Error posting heartbeat to leader: %v", err)
+				e.metrics.heartbeats.With(badHb(err)).Inc()
 				continue
 			}
 			if resp.StatusCode != http.StatusOK {
+				e.metrics.heartbeats.With(badHb(fmt.Errorf("got status code %d", resp.StatusCode))).Inc()
 				elog.Printf("Leader responded to heartbeat with status code %d.", resp.StatusCode)
 				continue
 			}
 			elog.Println("Successfully sent heartbeat to leader.")
+			e.metrics.heartbeats.With(goodHb).Inc()
 		}
 	}
 }
