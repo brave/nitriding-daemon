@@ -65,13 +65,13 @@ var (
 
 // Enclave represents a service running inside an AWS Nitro Enclave.
 type Enclave struct {
-	sync.RWMutex
 	attester
+	sync.Mutex            // Guard syncState.
 	cfg                   *Config
+	syncState             int
 	extPubSrv, extPrivSrv *http.Server
 	intSrv                *http.Server
 	promSrv               *http.Server
-	syncState             int
 	revProxy              *httputil.ReverseProxy
 	hashes                *AttestationHashes
 	promRegistry          *prometheus.Registry
@@ -367,8 +367,8 @@ func (e *Enclave) Start() error {
 
 // getSyncState returns the enclave's key synchronization state.
 func (e *Enclave) getSyncState() int {
-	e.RLock()
-	defer e.RUnlock()
+	e.Lock()
+	defer e.Unlock()
 	return e.syncState
 }
 
