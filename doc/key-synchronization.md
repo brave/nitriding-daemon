@@ -51,8 +51,8 @@ To set up key synchronization, several steps are necessary:
    enclave. In the next and final interaction, the leader encrypts its sensitive
    enclave keys $K_s$ using the worker's ephemeral public key $pk$, resulting in
    $E = \textrm{Enc}(K_s, pk)$. The leader then asks its hypervisor to create an
-   attestation document $A_l$ containing $\textrm{nonce}_w$ and $E$. The leader
-   sends $A_l$ to the worker in a separate `POST` request.
+   attestation document $A_l$ containing $\textrm{nonce}_w$ and SHA-256($E$).
+   The leader sends $A_l$ and $E$ to the worker in a separate `POST` request.
 6. Upon receiving $A_l$, the worker first verifies the attestation document
    (same as above), and decrypts $E$ using $sk$, revealing in $K_s$, the
    sensitive enclave keys. At this point, key synchronization is complete.
@@ -89,8 +89,6 @@ sequenceDiagram
   participant leaderApp as Enclave application
   participant leader as Leader enclave
   end
-  participant leaderEC2 as Leader EC2
-  participant workerEC2 as Worker EC2
   box rgba(100, 100, 100, .1) Worker enclave
   participant worker as Worker enclave
   participant workerApp as Enclave application
@@ -99,10 +97,12 @@ sequenceDiagram
 leader->>leader: Generate HTTPS certificate
 leaderApp->>leaderApp: Generate key material
 
-Note over leader,leaderEC2: Designating enclave as leader
-leaderEC2->>+leader: GET /enclave/leader
-leader->>leader: Expose leader-specific endpoints
-leader-->>-leaderEC2: OK
+Note over leader,worker: Enclaves designate the leader
+worker->>+leader: GET /enclave/leader (nonce_w)
+leader-->>-worker: OK
+worker->>worker: Did not call itself: worker
+leader->>leader: GET /enclave/leader (nonce_l)
+leader->>leader: Did call itself: leader
 
 Note over leaderApp,leader: Application sets its key material
 leaderApp->>+leader: PUT /enclave/state (key material)
@@ -121,7 +121,7 @@ worker->>worker: Create attestation, nonce, and ephemeral keys
 worker-->>-leader: OK (Attestation(nonce_l, nonce_w, pk))
 
 leader->>leader: Verify & create attestation
-leader->>+worker: POST /enclave/sync (Attestation(nonce_w, E(keys, pk)))
+leader->>+worker: POST /enclave/sync (Attestation(nonce_w, SHA-256(E(keys, pk))), E(keys, pk))
 worker->>worker: Verify attestation & install keys
 worker-->>-leader: OK
 
