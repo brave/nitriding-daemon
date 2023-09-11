@@ -53,6 +53,11 @@ type leaderAuxInfo struct {
 // auxiliary information into JSON, and does not do any cryptography.
 type dummyAttester struct{}
 
+// newDummyAttester returns a new dummyAttester.
+func newDummyAttester() *dummyAttester {
+	return new(dummyAttester)
+}
+
 func (*dummyAttester) createAttstn(aux auxInfo) ([]byte, error) {
 	return json.Marshal(aux)
 }
@@ -67,9 +72,9 @@ func (*dummyAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 	if err := json.Unmarshal(doc, &w); err != nil {
 		return nil, err
 	}
-	if len(w.WorkersNonce) == nonceLen && len(w.LeadersNonce) == nonceLen && w.PublicKey != nil {
+	if w.PublicKey != nil {
 		if n.b64() != w.LeadersNonce.b64() {
-			return nil, errors.New("leader nonce not in cache")
+			return nil, errNonceMismatch
 		}
 		return &w, nil
 	}
@@ -78,9 +83,9 @@ func (*dummyAttester) verifyAttstn(doc []byte, n nonce) (auxInfo, error) {
 	if err := json.Unmarshal(doc, &l); err != nil {
 		return nil, err
 	}
-	if len(l.WorkersNonce) == nonceLen && l.HashOfEncrypted != nil {
+	if l.HashOfEncrypted != nil {
 		if n.b64() != l.WorkersNonce.b64() {
-			return nil, errors.New("worker nonce not in cache")
+			return nil, errNonceMismatch
 		}
 		return &l, nil
 	}
@@ -94,7 +99,7 @@ type nitroAttester struct{}
 
 // newNitroAttester returns a new nitroAttester.
 func newNitroAttester() *nitroAttester {
-	return &nitroAttester{}
+	return new(nitroAttester)
 }
 
 // createAttstn asks the AWS Nitro Enclave hypervisor for an attestation
@@ -124,11 +129,7 @@ func (*nitroAttester) createAttstn(aux auxInfo) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err = s.Close(); err != nil {
-			elog.Printf("Error closing NSM session: %v", err)
-		}
-	}()
+	defer s.Close()
 
 	res, err := s.Send(&request.Attestation{
 		Nonce:     nonce,
@@ -162,8 +163,6 @@ func (*nitroAttester) verifyAttstn(doc []byte, ourNonce nonce) (auxInfo, error) 
 		return nil, err
 	}
 	if !arePCRsIdentical(ourPCRs, their.Document.PCRs) {
-		elog.Printf("Our PCR values:\n%s", prettyFormat(ourPCRs))
-		elog.Printf("Their PCR values:\n%s", prettyFormat(their.Document.PCRs))
 		return nil, errPCRMismatch
 	}
 
@@ -180,14 +179,12 @@ func (*nitroAttester) verifyAttstn(doc []byte, ourNonce nonce) (auxInfo, error) 
 	// If the "public key" field contains padding, we know that we're
 	// dealing with a leader's auxiliary information.
 	if bytes.Equal(their.Document.PublicKey, padding) {
-		elog.Println("Extracting leader's auxiliary information.")
 		return &leaderAuxInfo{
 			WorkersNonce:    theirNonce,
 			HashOfEncrypted: their.Document.UserData,
 		}, nil
 	}
 
-	elog.Println("Extracting worker's auxiliary information.")
 	workersNonce, err := sliceToNonce(their.Document.UserData)
 	if err != nil {
 		return nil, err
