@@ -55,7 +55,6 @@ const (
 	inProgress = 1 // Leader designation is in progress.
 	isLeader   = 2 // The enclave is the leader.
 	isWorker   = 3 // The enclave is a worker.
-
 )
 
 var (
