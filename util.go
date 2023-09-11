@@ -178,6 +178,10 @@ func getLocalAddr() string {
 }
 
 func getLocalEC2Hostname() (string, error) {
+	const (
+		maxTokenLen    = 100
+		maxHostnameLen = 255
+	)
 	// IMDSv2, which we are using, is session-oriented (God knows why), so we
 	// first obtain a session token from the service.
 	req, err := http.NewRequest(http.MethodPut, metadataSvcToken, nil)
@@ -189,7 +193,7 @@ func getLocalEC2Hostname() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(newLimitReader(resp.Body, maxTokenLen))
 	if err != nil {
 		return "", err
 	}
@@ -206,7 +210,7 @@ func getLocalEC2Hostname() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	body, err = io.ReadAll(resp.Body)
+	body, err = io.ReadAll(newLimitReader(resp.Body, maxHostnameLen))
 	if err != nil {
 		return "", err
 	}
