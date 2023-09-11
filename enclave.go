@@ -28,8 +28,6 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
-// TODO: Support Let's Encrypt (if we choose to).
-
 const (
 	acmeCertCacheDir    = "cert-cache"
 	certificateOrg      = "AWS Nitro enclave application"
