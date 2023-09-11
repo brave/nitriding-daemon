@@ -345,7 +345,7 @@ func TestReadiness(t *testing.T) {
 	}(t, u)
 }
 
-func TestReadyHandler(t *testing.T) {
+func TestReadinessWithWaitForUp(t *testing.T) {
 	cfg := defaultCfg
 	cfg.WaitForApp = true
 	e := createEnclave(&cfg)
@@ -370,6 +370,31 @@ func TestReadyHandler(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status code %d but got %d.", http.StatusOK, resp.StatusCode)
 	}
+}
+
+func TestReadyHandler(t *testing.T) {
+	var (
+		ready = make(chan struct{})
+		wg    sync.WaitGroup
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ready
+	}()
+
+	makeReq := makeReqToHandler(readyHandler(ready))
+	assertResponse(t,
+		makeReq(http.MethodGet, pathReady, nil),
+		newResp(http.StatusOK, ""),
+	)
+	wg.Wait()
+
+	// Subsequent calls should return 410 Gone.
+	assertResponse(t,
+		makeReq(http.MethodGet, pathReady, nil),
+		newResp(http.StatusGone, ""),
+	)
 }
 
 func TestAttestationHandlerWhileProfiling(t *testing.T) {
