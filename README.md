@@ -56,3 +56,4 @@ system, take a look at our [research paper](https://arxiv.org/abs/2206.04123).
 * [How to use nitriding](doc/usage.md)
 * [System architecture](doc/architecture.md)
 * [Example application](example/)
+* [Setup enclave EC2 host](doc/setup.md)
