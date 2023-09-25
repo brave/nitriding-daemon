@@ -2,15 +2,45 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"sync"
 
 	"golang.org/x/crypto/acme/autocert"
 )
 
+var errUninitializedCert = errors.New("certificate not yet initialized")
+
+// certRetriever stores an HTTPS certificate and implements the GetCertificate
+// function signature, which allows our Web servers to retrieve the
+// certificate when clients connect:
+// https://pkg.go.dev/crypto/tls#Config
+type certRetriever struct {
+	sync.Mutex // Guards cert.
+	cert       *tls.Certificate
+}
+
+func (c *certRetriever) set(cert *tls.Certificate) {
+	c.Lock()
+	defer c.Unlock()
+
+	c.cert = cert
+}
+
+func (c *certRetriever) get(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	c.Lock()
+	defer c.Unlock()
+
+	if c.cert == nil {
+		return nil, errUninitializedCert
+	}
+	return c.cert, nil
+}
+
 // certCache implements the autocert.Cache interface.
 type certCache struct {
-	sync.RWMutex
-	cache map[string][]byte
+	sync.RWMutex // Guards cache.
+	cache        map[string][]byte
 }
 
 func newCertCache() *certCache {

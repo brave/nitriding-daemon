@@ -8,6 +8,8 @@ all: lint test $(binary)
 .PHONY: lint
 lint: $(godeps)
 	golangci-lint run
+	go vet ./...
+	govulncheck ./...
 
 .PHONY: test
 test: $(godeps)

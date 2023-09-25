@@ -18,7 +18,7 @@ func TestHandlerMetrics(t *testing.T) {
 	// installed.
 	c.PrometheusPort = 80
 	enclave := createEnclave(&c)
-	makeReq := makeRequestFor(enclave.pubSrv)
+	makeReq := makeReqToSrv(enclave.extPubSrv)
 
 	// GET /enclave/config
 	assertResponse(t,
@@ -50,7 +50,7 @@ func TestHandlerMetrics(t *testing.T) {
 	), float64(1))
 
 	// POST /enclave/hash
-	makeReq = makeRequestFor(enclave.privSrv)
+	makeReq = makeReqToSrv(enclave.intSrv)
 	assertResponse(t,
 		makeReq(http.MethodPost, pathHash, bytes.NewBufferString("foo")),
 		newResp(http.StatusBadRequest, errNoBase64.Error()),

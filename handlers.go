@@ -3,30 +3,40 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 )
 
 const (
 	// The maximum length of the key material (in bytes) that enclave
 	// applications can PUT to our HTTP API.
 	maxKeyMaterialLen = 1024 * 1024
+	// The maximum length (in bytes) of a heartbeat's request body:
+	// 44 bytes for the Base64-encoded SHA-256 hash, 255 bytes for the domain
+	// name, and another 128 bytes for the port and the surrounding JSON.
+	maxHeartbeatBody = 44 + 255 + 128
 	// The HTML for the enclave's index page.
 	indexPage = "This host runs inside an AWS Nitro Enclave.\n"
 )
 
 var (
-	errFailedReqBody  = errors.New("failed to read request body")
-	errFailedGetState = errors.New("failed to retrieve saved state")
-	errNoAddr         = errors.New("parameter 'addr' not found")
-	errBadSyncAddr    = errors.New("invalid 'addr' parameter for sync")
-	errHashWrongSize  = errors.New("given hash is of invalid size")
+	errFailedReqBody         = errors.New("failed to read request body")
+	errHashWrongSize         = errors.New("given hash is of invalid size")
+	errNoBase64              = errors.New("no Base64 given")
+	errDesignationInProgress = errors.New("leader designation in progress")
+	errEndpointGone          = errors.New("endpoint not meant to be used")
+	errKeySyncDisabled       = errors.New("key synchronization is disabled")
 )
+
+func errNo200(code int) error {
+	return fmt.Errorf("peer responded with HTTP code %d", code)
+}
 
 func formatIndexPage(appURL *url.URL) string {
 	page := indexPage
@@ -46,62 +56,31 @@ func rootHandler(cfg *Config) http.HandlerFunc {
 	}
 }
 
-// reqSyncHandler returns a handler that lets the enclave application request
-// state synchronization, which copies the given remote enclave's state into
-// our state.
-//
-// This is an enclave-internal endpoint that can only be accessed by the
-// trusted enclave application.
-//
-// FIXME: https://github.com/brave/nitriding-daemon/issues/10
-func reqSyncHandler(e *Enclave) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		// The 'addr' parameter must have the following form:
-		// https://example.com:443
-		addrs, ok := q["addr"]
-		if !ok {
-			http.Error(w, errNoAddr.Error(), http.StatusBadRequest)
-			return
-		}
-		addr := addrs[0]
-
-		// Are we dealing with a well-formed URL?
-		if _, err := url.Parse(addr); err != nil {
-			http.Error(w, errBadSyncAddr.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if err := RequestKeys(addr, e.KeyMaterial); err != nil {
-			http.Error(w, fmt.Sprintf("failed to synchronize state: %v", err), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}
-}
-
 // getStateHandler returns a handler that lets the enclave application retrieve
 // previously-set state.
 //
 // This is an enclave-internal endpoint that can only be accessed by the
 // trusted enclave application.
-func getStateHandler(e *Enclave) http.HandlerFunc {
+func getStateHandler(getSyncState func() int, keys *enclaveKeys) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		s, err := e.KeyMaterial()
-		if err != nil {
-			http.Error(w, errFailedGetState.Error(), http.StatusInternalServerError)
-			return
-		}
-		n, err := w.Write(s.([]byte))
-		if err != nil {
-			elog.Printf("Error writing state to client: %v", err)
-			return
-		}
-		expected := len(s.([]byte))
-		if n != expected {
-			elog.Printf("Only wrote %d out of %d-byte state to client.", n, expected)
-			return
+		switch getSyncState() {
+		case noSync:
+			http.Error(w, errKeySyncDisabled.Error(), http.StatusForbidden)
+		case isLeader:
+			http.Error(w, errEndpointGone.Error(), http.StatusGone)
+		case inProgress:
+			http.Error(w, errDesignationInProgress.Error(), http.StatusServiceUnavailable)
+		case isWorker:
+			w.Header().Set("Content-Type", "application/octet-stream")
+			appKeys := keys.getAppKeys()
+			n, err := w.Write(appKeys)
+			if err != nil {
+				elog.Fatalf("Error writing state to client: %v", err)
+			}
+			expected := len(appKeys)
+			if n != expected {
+				elog.Fatalf("Only wrote %d out of %d-byte state to client.", n, expected)
+			}
 		}
 	}
 }
@@ -112,15 +91,42 @@ func getStateHandler(e *Enclave) http.HandlerFunc {
 //
 // This is an enclave-internal endpoint that can only be accessed by the
 // trusted enclave application.
-func putStateHandler(e *Enclave) http.HandlerFunc {
+func putStateHandler(
+	a attester,
+	getSyncState func() int,
+	enclaveKeys *enclaveKeys,
+	workers *workerManager,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(newLimitReader(r.Body, maxKeyMaterialLen))
-		if err != nil {
-			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
-			return
+		switch getSyncState() {
+		case noSync:
+			http.Error(w, errKeySyncDisabled.Error(), http.StatusForbidden)
+		case isWorker:
+			http.Error(w, errEndpointGone.Error(), http.StatusGone)
+		case inProgress:
+			http.Error(w, errDesignationInProgress.Error(), http.StatusServiceUnavailable)
+		case isLeader:
+			keys, err := io.ReadAll(newLimitReader(r.Body, maxKeyMaterialLen))
+			if err != nil {
+				http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
+				return
+			}
+			enclaveKeys.setAppKeys(keys)
+			w.WriteHeader(http.StatusOK)
+
+			// The leader's application keys have changed.  Re-synchronize the key
+			// material with all registered workers.  If synchronization fails for a
+			// given worker, unregister it.
+			elog.Printf("Application keys have changed.  Re-synchronizing with %d worker(s).",
+				workers.length())
+			go workers.forAll(
+				func(worker *url.URL) {
+					if err := asLeader(enclaveKeys, a).syncWith(worker); err != nil {
+						workers.unregister(worker)
+					}
+				},
+			)
 		}
-		e.SetKeyMaterial(body)
-		w.WriteHeader(http.StatusOK)
 	}
 }
 
@@ -163,17 +169,18 @@ func hashHandler(e *Enclave) http.HandlerFunc {
 // signal that it's ready, instructing nitriding to start its Internet-facing
 // Web server.  We initially gate access to the Internet-facing API to avoid
 // the issuance of unexpected attestation documents that lack the application's
-// hash because the application couldn't register it in time.  The downside is
-// that state synchronization among enclaves does not work until the
-// application signalled its readiness.  While not ideal, we chose to ignore
-// this for now.
+// hash because the application couldn't register it in time.
 //
 // This is an enclave-internal endpoint that can only be accessed by the
 // trusted enclave application.
-func readyHandler(e *Enclave) http.HandlerFunc {
+func readyHandler(ready chan struct{}) http.HandlerFunc {
+	var once sync.Once
 	return func(w http.ResponseWriter, r *http.Request) {
-		close(e.ready)
-		w.WriteHeader(http.StatusOK)
+		once.Do(func() {
+			close(ready)
+			w.WriteHeader(http.StatusOK)
+		})
+		w.WriteHeader(http.StatusGone)
 	}
 }
 
@@ -192,36 +199,94 @@ func configHandler(cfg *Config) http.HandlerFunc {
 // subsequently asks its hypervisor for an attestation document that contains
 // both the nonce and the hashes in the given struct.  The resulting
 // Base64-encoded attestation document is then returned to the requester.
-func attestationHandler(useProfiling bool, hashes *AttestationHashes) http.HandlerFunc {
+func attestationHandler(useProfiling bool, hashes *AttestationHashes, a attester) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if useProfiling {
-			http.Error(w, errProfilingSet, http.StatusServiceUnavailable)
-			return
-		}
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, errBadForm, http.StatusBadRequest)
+			http.Error(w, errProfilingSet.Error(), http.StatusServiceUnavailable)
 			return
 		}
 
-		nonce := r.URL.Query().Get("nonce")
-		if nonce == "" {
-			http.Error(w, errNoNonce, http.StatusBadRequest)
-			return
-		}
-		nonce = strings.ToLower(nonce)
-		// Decode hex-encoded nonce.
-		rawNonce, err := hex.DecodeString(nonce)
+		n, err := getNonceFromReq(r)
 		if err != nil {
-			http.Error(w, errBadNonceFormat, http.StatusBadRequest)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		rawDoc, err := attest(rawNonce, hashes.Serialize(), nil)
+		rawDoc, err := a.createAttstn(&clientAuxInfo{
+			clientNonce:       n,
+			attestationHashes: hashes.Serialize(),
+		})
 		if err != nil {
-			http.Error(w, errFailedAttestation, http.StatusInternalServerError)
+			http.Error(w, errFailedAttestation.Error(), http.StatusInternalServerError)
 			return
 		}
 		b64Doc := base64.StdEncoding.EncodeToString(rawDoc)
 		fmt.Fprintln(w, b64Doc)
+	}
+}
+
+func heartbeatHandler(e *Enclave) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var (
+			hb              heartbeatRequest
+			syncAndRegister = func(keys *enclaveKeys, worker *url.URL) {
+				if err := asLeader(keys, e.attester).syncWith(worker); err == nil {
+					e.workers.register(worker)
+				}
+			}
+		)
+
+		body, err := io.ReadAll(newLimitReader(r.Body, maxHeartbeatBody))
+		if err != nil {
+			http.Error(w, errFailedReqBody.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := json.Unmarshal(body, &hb); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		worker, err := e.getWorker(&hb)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		elog.Printf("Heartbeat from worker %s.", worker.Host)
+		ourKeysHash, theirKeysHash := e.keys.hashAndB64(), hb.HashedKeys
+		if ourKeysHash != theirKeysHash {
+			elog.Printf("Worker's keys are invalid.  Re-synchronizing.")
+			go syncAndRegister(e.keys, worker)
+		} else {
+			e.workers.register(worker)
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func getLeaderHandler(ourNonce nonce, weAreLeader chan struct{}) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var (
+			err        error
+			theirNonce nonce
+		)
+		theirNonce, err = getNonceFromReq(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if ourNonce == theirNonce {
+			if len(weAreLeader) == 0 {
+				weAreLeader <- struct{}{}
+			}
+		} else {
+			// We may end up in this branch for two reasons:
+			// 1. We're the leader and a worker beat us to talking to this
+			//    endpoint.
+			// 2. We're a worker and some other entity in the private network is
+			//    talking to this endpoint.  That shouldn't happen.
+			elog.Println("Received nonce that does not match our own.")
+		}
+		w.WriteHeader(http.StatusOK)
 	}
 }
