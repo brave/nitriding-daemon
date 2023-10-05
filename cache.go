@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-const (
-	defaultItemExpiry = time.Minute
-)
-
 // cache implements a simple cache whose items expire.
 type cache struct {
 	sync.RWMutex

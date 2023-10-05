@@ -33,13 +33,15 @@ func init() {
 }
 
 func main() {
-	var fqdn, appURL, appWebSrv, appCmd, prometheusNamespace string
-	var extPort, intPort, hostProxyPort, prometheusPort uint
-	var useACME, waitForApp, useProfiling, debug bool
+	var fqdn, fqdnLeader, appURL, appWebSrv, appCmd, prometheusNamespace, mockCertFp string
+	var extPubPort, extPrivPort, intPort, hostProxyPort, prometheusPort uint
+	var useACME, waitForApp, useProfiling, useVsockForExtPort, disableKeepAlives, debug bool
 	var err error
 
 	flag.StringVar(&fqdn, "fqdn", "",
 		"FQDN of the enclave application (e.g., \"example.com\").")
+	flag.StringVar(&fqdnLeader, "fqdn-leader", "",
+		"FQDN of the leader enclave (e.g., \"leader.example.com\").  Setting this enables key synchronization.")
 	flag.StringVar(&appURL, "appurl", "",
 		"Code repository of the enclave application (e.g., \"github.com/foo/bar\").")
 	flag.StringVar(&appWebSrv, "appwebsrv", "",
@@ -48,8 +50,14 @@ func main() {
 		"Launch enclave application via the given command.")
 	flag.StringVar(&prometheusNamespace, "prometheus-namespace", "",
 		"Prometheus namespace for exported metrics.")
-	flag.UintVar(&extPort, "extport", 443,
-		"Nitriding's VSOCK-facing HTTPS port.  Must match port forwarding rules on EC2 host.")
+	flag.UintVar(&extPubPort, "ext-pub-port", 443,
+		"Nitriding's external, public HTTPS port.  Must match port forwarding rules on EC2 host.")
+	flag.UintVar(&extPrivPort, "ext-priv-port", 444,
+		"Nitriding's external, non-public HTTPS port.  Must match port forwarding rules on the EC2 host.")
+	flag.BoolVar(&disableKeepAlives, "disable-keep-alives", false,
+		"Disables keep-alive connections for the HTTPS service.")
+	flag.BoolVar(&useVsockForExtPort, "vsock-ext", false,
+		"Listen on VSOCK interface for HTTPS port.")
 	flag.UintVar(&intPort, "intport", 8080,
 		"Nitriding's enclave-internal HTTP port.  Only used by the enclave application.")
 	flag.UintVar(&hostProxyPort, "host-proxy-port", 1024,
@@ -63,14 +71,19 @@ func main() {
 	flag.BoolVar(&waitForApp, "wait-for-app", false,
 		"Start Internet-facing Web server only after application signals its readiness.")
 	flag.BoolVar(&debug, "debug", false,
-		"Print debug messages.")
+		"Print extra debug messages and use dummy attester for testing outside enclaves.")
+	flag.StringVar(&mockCertFp, "mock-cert-fp", "",
+		"Mock certificate fingerprint to use in attestation documents (hexadecimal)")
 	flag.Parse()
 
 	if fqdn == "" {
 		elog.Fatalf("-fqdn must be set.")
 	}
-	if extPort < 1 || extPort > math.MaxUint16 {
+	if extPubPort < 1 || extPubPort > math.MaxUint16 {
 		elog.Fatalf("-extport must be in interval [1, %d]", math.MaxUint16)
+	}
+	if extPrivPort < 1 || extPrivPort > math.MaxUint16 {
+		elog.Fatalf("-extPrivPort must be in interval [1, %d]", math.MaxUint16)
 	}
 	if intPort < 1 || intPort > math.MaxUint16 {
 		elog.Fatalf("-intport must be in interval [1, %d]", math.MaxUint16)
@@ -87,14 +100,19 @@ func main() {
 
 	c := &Config{
 		FQDN:                fqdn,
-		ExtPort:             uint16(extPort),
+		FQDNLeader:          fqdnLeader,
+		ExtPubPort:          uint16(extPubPort),
+		ExtPrivPort:         uint16(extPrivPort),
 		IntPort:             uint16(intPort),
+		UseVsockForExtPort:  useVsockForExtPort,
+		DisableKeepAlives:   disableKeepAlives,
 		PrometheusPort:      uint16(prometheusPort),
 		PrometheusNamespace: prometheusNamespace,
 		HostProxyPort:       uint32(hostProxyPort),
 		UseACME:             useACME,
 		WaitForApp:          waitForApp,
 		UseProfiling:        useProfiling,
+		MockCertFp:          mockCertFp,
 		Debug:               debug,
 	}
 	if appURL != "" {
@@ -110,6 +128,9 @@ func main() {
 			elog.Fatalf("Failed to parse URL of Web server: %v", err)
 		}
 		c.AppWebSrv = u
+	}
+	if debug {
+		elog.Println("WARNING: Using debug mode, which must not be enabled in production!")
 	}
 
 	enclave, err := NewEnclave(c)
