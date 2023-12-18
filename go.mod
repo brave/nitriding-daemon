@@ -13,8 +13,8 @@ require (
 	github.com/prometheus/client_golang v1.15.1
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
 	github.com/vishvananda/netlink v1.2.1-beta.2
-	golang.org/x/crypto v0.14.0
-	golang.org/x/sys v0.13.0
+	golang.org/x/crypto v0.17.0
+	golang.org/x/sys v0.15.0
 )
 
 require (
@@ -35,6 +35,6 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
 )
