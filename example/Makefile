@@ -21,7 +21,7 @@ image: $(image_tar)
 $(image_tar): Dockerfile service.py start.sh
 	docker run \
 		-v $(PWD):/workspace \
-		gcr.io/kaniko-project/executor:v1.19.2 \
+		gcr.io/kaniko-project/executor:v1.9.2 \
 		--reproducible \
 		--no-push \
 		--tarPath $(image_tar) \
