@@ -58,7 +58,7 @@ func TestAttestationHashes(t *testing.T) {
 	e.intSrv.Handler.ServeHTTP(rec, req)
 
 	s := e.hashes.Serialize()
-	expectedLen := sha256.Size*2 + len(hashPrefix)*2 + len(hashSeparator)
+	expectedLen := sha256.Size*2 + len(hashPrefix)*2
 	if len(s) != expectedLen {
 		t.Fatalf("Expected serialized hashes to be of length %d but got %d.",
 			expectedLen, len(s))
@@ -71,8 +71,7 @@ func TestAttestationHashes(t *testing.T) {
 	}
 
 	// Make sure that our previously-set hash is as expected.
-	expected := []byte(hashSeparator)
-	expected = append(expected, []byte(hashPrefix)...)
+	expected := []byte(hashPrefix)
 	expected = append(expected, appKeyHash[:]...)
 	offset := len(hashPrefix) + sha256.Size
 	if !bytes.Equal(s[offset:], expected) {
