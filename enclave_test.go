@@ -6,11 +6,12 @@ import (
 
 var defaultCfg = Config{
 	FQDN:          "example.com",
-	ExtPort:       50000,
-	IntPort:       50001,
+	ExtPubPort:    50000,
+	ExtPrivPort:   50001,
+	IntPort:       50002,
 	HostProxyPort: 1024,
 	UseACME:       false,
-	Debug:         false,
+	Debug:         true,
 	FdCur:         1024,
 	FdMax:         4096,
 	WaitForApp:    true,
@@ -46,7 +47,8 @@ func TestValidateConfig(t *testing.T) {
 	}
 
 	// Set the remaining required fields.
-	c.ExtPort = 1
+	c.ExtPubPort = 1
+	c.ExtPrivPort = 1
 	c.IntPort = 1
 	c.HostProxyPort = 1
 	if err = c.Validate(); err != nil {
@@ -58,23 +60,5 @@ func TestGenSelfSignedCert(t *testing.T) {
 	e := createEnclave(&defaultCfg)
 	if err := e.genSelfSignedCert(); err != nil {
 		t.Fatalf("Failed to create self-signed certificate: %s", err)
-	}
-}
-
-func TestKeyMaterial(t *testing.T) {
-	e := createEnclave(&defaultCfg)
-	k := struct{ Foo string }{"foobar"}
-
-	if _, err := e.KeyMaterial(); err != errNoKeyMaterial {
-		t.Fatal("Expected error because we're trying to retrieve non-existing key material.")
-	}
-
-	e.SetKeyMaterial(k)
-	r, err := e.KeyMaterial()
-	if err != nil {
-		t.Fatalf("Failed to retrieve key material: %s", err)
-	}
-	if r != k {
-		t.Fatal("Retrieved key material is unexpected.")
 	}
 }

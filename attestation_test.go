@@ -20,6 +20,12 @@ func TestArePCRsIdentical(t *testing.T) {
 		t.Fatal("Failed to recognize identical PCRs as such.")
 	}
 
+	// PCR4 should be ignored.
+	pcr1[4], pcr2[4] = []byte("foo"), []byte("bar")
+	if !arePCRsIdentical(pcr1, pcr2) {
+		t.Fatal("Failed to recognize identical PCRs as such.")
+	}
+
 	// Add a new PCR value, so our two maps are no longer identical.
 	pcr1[2] = []byte("barfoo")
 	if arePCRsIdentical(pcr1, pcr2) {
@@ -49,10 +55,10 @@ func TestAttestationHashes(t *testing.T) {
 	rec := httptest.NewRecorder()
 	buf := bytes.NewBufferString(base64.StdEncoding.EncodeToString(appKeyHash[:]))
 	req := httptest.NewRequest(http.MethodPost, pathHash, buf)
-	e.privSrv.Handler.ServeHTTP(rec, req)
+	e.intSrv.Handler.ServeHTTP(rec, req)
 
 	s := e.hashes.Serialize()
-	expectedLen := sha256.Size*2 + len(hashPrefix)*2 + len(hashSeparator)
+	expectedLen := sha256.Size*2 + len(hashPrefix)*2
 	if len(s) != expectedLen {
 		t.Fatalf("Expected serialized hashes to be of length %d but got %d.",
 			expectedLen, len(s))
@@ -65,8 +71,7 @@ func TestAttestationHashes(t *testing.T) {
 	}
 
 	// Make sure that our previously-set hash is as expected.
-	expected := []byte(hashSeparator)
-	expected = append(expected, []byte(hashPrefix)...)
+	expected := []byte(hashPrefix)
 	expected = append(expected, appKeyHash[:]...)
 	offset := len(hashPrefix) + sha256.Size
 	if !bytes.Equal(s[offset:], expected) {

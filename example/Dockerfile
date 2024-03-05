@@ -6,7 +6,8 @@ WORKDIR /
 
 # Clone the repository and build the stand-alone nitriding executable.
 RUN git clone https://github.com/brave/nitriding-daemon.git
-RUN make -C nitriding-daemon/ nitriding
+ARG TARGETARCH
+RUN ARCH=${TARGETARCH} make -C nitriding-daemon/ nitriding
 
 # Use the intermediate builder image to add our files.  This is necessary to
 # avoid intermediate layers that contain inconsistent file permissions.

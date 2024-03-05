@@ -3,11 +3,15 @@ godeps = *.go go.mod go.sum
 cover_out = cover.out
 cover_html = cover.html
 
+ARCH ?= amd64
+
 all: lint test $(binary)
 
 .PHONY: lint
 lint: $(godeps)
 	golangci-lint run
+	go vet ./...
+	govulncheck ./...
 
 .PHONY: test
 test: $(godeps)
@@ -22,7 +26,7 @@ $(cover_html): $(cover_out)
 	go tool cover -html=$(cover_out) -o $(cover_html)
 
 $(binary): $(godeps)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -buildvcs=false -o $(binary)
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags="-s -w" -buildvcs=false -o $(binary)
 
 .PHONY: clean
 clean:

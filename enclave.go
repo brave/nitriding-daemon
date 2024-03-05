@@ -1,19 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -41,7 +38,6 @@ const (
 	parentCID = 3
 	// The following paths are handled by nitriding.
 	pathRoot        = "/enclave"
-	pathNonce       = "/enclave/nonce"
 	pathAttestation = "/enclave/attestation"
 	pathState       = "/enclave/state"
 	pathSync        = "/enclave/sync"
@@ -49,31 +45,40 @@ const (
 	pathReady       = "/enclave/ready"
 	pathProfiling   = "/enclave/debug"
 	pathConfig      = "/enclave/config"
+	pathLeader      = "/enclave/leader"
+	pathHeartbeat   = "/enclave/heartbeat"
 	// All other paths are handled by the enclave application's Web server if
 	// it exists.
 	pathProxy = "/*"
+	// The states the enclave can be in relating to key synchronization.
+	noSync     = 0 // The enclave is not configured to synchronize keys.
+	inProgress = 1 // Leader designation is in progress.
+	isLeader   = 2 // The enclave is the leader.
+	isWorker   = 3 // The enclave is a worker.
 )
 
 var (
-	errNoKeyMaterial  = errors.New("no key material registered")
 	errCfgMissingFQDN = errors.New("given config is missing FQDN")
 	errCfgMissingPort = errors.New("given config is missing port")
 )
 
 // Enclave represents a service running inside an AWS Nitro Enclave.
 type Enclave struct {
-	sync.RWMutex
-	cfg          *Config
-	pubSrv       *http.Server
-	privSrv      *http.Server
-	promSrv      *http.Server
-	revProxy     *httputil.ReverseProxy
-	hashes       *AttestationHashes
-	promRegistry *prometheus.Registry
-	metrics      *metrics
-	nonceCache   *cache
-	keyMaterial  any
-	ready, stop  chan bool
+	attester
+	sync.Mutex            // Guard syncState.
+	cfg                   *Config
+	syncState             int
+	extPubSrv, extPrivSrv *http.Server
+	intSrv                *http.Server
+	promSrv               *http.Server
+	revProxy              *httputil.ReverseProxy
+	hashes                *AttestationHashes
+	promRegistry          *prometheus.Registry
+	metrics               *metrics
+	workers               *workerManager
+	keys                  *enclaveKeys
+	httpsCert             *certRetriever
+	ready, stop           chan struct{}
 }
 
 // Config represents the configuration of our enclave service.
@@ -83,25 +88,36 @@ type Config struct {
 	// is required.
 	FQDN string
 
-	// ExtPort contains the TCP port that the Web server should
+	// FQDNLeader contains the fully qualified domain name of the leader
+	// enclave, which coordinates enclave synchronization.  Only set this field
+	// if horizontal scaling is required.
+	FQDNLeader string
+
+	// ExtPubPort contains the TCP port that the public Web server should
 	// listen on, e.g. 443.  This port is not *directly* reachable by the
 	// Internet but the EC2 host's proxy *does* forward Internet traffic to
 	// this port.  This field is required.
-	ExtPort uint16
+	ExtPubPort uint16
 
-	// UseVsockForExtPort must be set to true if direct communication
-	// between the host and Web server via VSOCK is desired. The daemon will listen
-	// on the enclave's VSOCK address and the port defined in ExtPort.
-	UseVsockForExtPort bool
-
-	// DisableKeepAlives must be set to true if keep-alive connections
-	// should be disabled for the HTTPS service.
-	DisableKeepAlives bool
+	// ExtPrivPort contains the TCP port that the non-public Web server should
+	// listen on.  The Web server behind this port exposes confidential
+	// endpoints and is therefore only meant to be reachable by the enclave
+	// administrator but *not* the public Internet.
+	ExtPrivPort uint16
 
 	// IntPort contains the enclave-internal TCP port of the Web server that
 	// provides an HTTP API to the enclave application.  This field is
 	// required.
 	IntPort uint16
+
+	// UseVsockForExtPort must be set to true if direct communication
+	// between the host and Web server via VSOCK is desired. The daemon will listen
+	// on the enclave's VSOCK address and the port defined in ExtPubPort.
+	UseVsockForExtPort bool
+
+	// DisableKeepAlives must be set to true if keep-alive connections
+	// should be disabled for the HTTPS service.
+	DisableKeepAlives bool
 
 	// HostProxyPort indicates the TCP port of the proxy application running on
 	// the EC2 host.  Note that VSOCK ports are 32 bits large.  This field is
@@ -165,17 +181,27 @@ type Config struct {
 	//
 	//     GET http://127.0.0.1:{IntPort}/enclave/ready
 	WaitForApp bool
+
+	// MockCertFp specifies a mock TLS certificate fingerprint
+	// to use in attestation documents.
+	MockCertFp string
 }
 
 // Validate returns an error if required fields in the config are not set.
 func (c *Config) Validate() error {
-	if c.ExtPort == 0 || c.IntPort == 0 || c.HostProxyPort == 0 {
+	if c.ExtPubPort == 0 || c.IntPort == 0 || c.HostProxyPort == 0 {
 		return errCfgMissingPort
 	}
 	if c.FQDN == "" {
 		return errCfgMissingFQDN
 	}
 	return nil
+}
+
+// isScalingEnabled returns true if horizontal enclave scaling is enabled in our
+// enclave configuration.
+func (c *Config) isScalingEnabled() bool {
+	return c.FQDNLeader != ""
 }
 
 // String returns a string representation of the enclave's configuration.
@@ -195,11 +221,16 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 
 	reg := prometheus.NewRegistry()
 	e := &Enclave{
-		cfg: cfg,
-		pubSrv: &http.Server{
+		attester: &nitroAttester{},
+		cfg:      cfg,
+		extPubSrv: &http.Server{
 			Handler: chi.NewRouter(),
 		},
-		privSrv: &http.Server{
+		extPrivSrv: &http.Server{
+			Addr:    fmt.Sprintf(":%d", cfg.ExtPrivPort),
+			Handler: chi.NewRouter(),
+		},
+		intSrv: &http.Server{
 			Addr:    fmt.Sprintf("127.0.0.1:%d", cfg.IntPort),
 			Handler: chi.NewRouter(),
 		},
@@ -207,50 +238,63 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 			Addr:    fmt.Sprintf(":%d", cfg.PrometheusPort),
 			Handler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}),
 		},
+		httpsCert:    &certRetriever{},
+		keys:         &enclaveKeys{},
 		promRegistry: reg,
 		metrics:      newMetrics(reg, cfg.PrometheusNamespace),
-		nonceCache:   newCache(defaultItemExpiry),
 		hashes:       new(AttestationHashes),
-		stop:         make(chan bool),
-		ready:        make(chan bool),
+		workers:      newWorkerManager(time.Minute),
+		stop:         make(chan struct{}),
+		ready:        make(chan struct{}),
 	}
 
 	// Increase the maximum number of idle connections per host.  This is
 	// critical to boosting the requests per second that our reverse proxy can
 	// sustain.  See the following comment for more details:
 	// https://github.com/brave/nitriding-daemon/issues/2#issuecomment-1530245059
-	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 500
-	http.DefaultTransport.(*http.Transport).MaxIdleConns = 500
+	customTransport := &http.Transport{
+		MaxIdleConns:        500,
+		MaxIdleConnsPerHost: 500,
+	}
 
 	if cfg.Debug {
-		e.pubSrv.Handler.(*chi.Mux).Use(middleware.Logger)
-		e.privSrv.Handler.(*chi.Mux).Use(middleware.Logger)
+		e.attester = &dummyAttester{}
+		e.extPubSrv.Handler.(*chi.Mux).Use(middleware.Logger)
+		e.extPrivSrv.Handler.(*chi.Mux).Use(middleware.Logger)
+		e.intSrv.Handler.(*chi.Mux).Use(middleware.Logger)
 	}
 	if cfg.PrometheusPort > 0 {
-		e.pubSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
-		e.privSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
+		e.extPubSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
+		e.extPrivSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
+		e.intSrv.Handler.(*chi.Mux).Use(e.metrics.middleware)
 	}
 	if cfg.UseProfiling {
-		e.pubSrv.Handler.(*chi.Mux).Mount(pathProfiling, middleware.Profiler())
+		e.extPubSrv.Handler.(*chi.Mux).Mount(pathProfiling, middleware.Profiler())
 	}
 	if cfg.DisableKeepAlives {
-		e.pubSrv.SetKeepAlivesEnabled(false)
+		e.extPubSrv.SetKeepAlivesEnabled(false)
+	}
+	if cfg.isScalingEnabled() {
+		e.setSyncState(inProgress)
 	}
 
-	// Register public HTTP API.
-	m := e.pubSrv.Handler.(*chi.Mux)
-	m.Get(pathAttestation, attestationHandler(e.cfg.UseProfiling, e.hashes))
-	m.Get(pathNonce, nonceHandler(e))
+	// Register external public HTTP API.
+	m := e.extPubSrv.Handler.(*chi.Mux)
+	m.Get(pathAttestation, attestationHandler(e.cfg.UseProfiling, e.hashes, e.attester))
 	m.Get(pathRoot, rootHandler(e.cfg))
-	m.Post(pathSync, respSyncHandler(e))
 	m.Get(pathConfig, configHandler(e.cfg))
 
+	// Register external but private HTTP API.
+	m = e.extPrivSrv.Handler.(*chi.Mux)
+	m.Handle(pathSync, asWorker(e.setupWorkerPostSync, e.attester))
+
 	// Register enclave-internal HTTP API.
-	m = e.privSrv.Handler.(*chi.Mux)
-	m.Get(pathSync, reqSyncHandler(e))
-	m.Get(pathReady, readyHandler(e))
-	m.Get(pathState, getStateHandler(e))
-	m.Put(pathState, putStateHandler(e))
+	m = e.intSrv.Handler.(*chi.Mux)
+	if cfg.WaitForApp {
+		m.Get(pathReady, readyHandler(e.ready))
+	}
+	m.Get(pathState, getStateHandler(e.getSyncState, e.keys))
+	m.Put(pathState, putStateHandler(e.attester, e.getSyncState, e.keys, e.workers))
 	m.Post(pathHash, hashHandler(e))
 
 	// Configure our reverse proxy if the enclave application exposes an HTTP
@@ -258,7 +302,8 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	if cfg.AppWebSrv != nil {
 		e.revProxy = httputil.NewSingleHostReverseProxy(cfg.AppWebSrv)
 		e.revProxy.BufferPool = newBufPool()
-		e.pubSrv.Handler.(*chi.Mux).Handle(pathProxy, e.revProxy)
+		e.revProxy.Transport = customTransport
+		e.extPubSrv.Handler.(*chi.Mux).Handle(pathProxy, e.revProxy)
 		// If we expose Prometheus metrics, we keep track of the HTTP backend's
 		// responses.
 		if cfg.PrometheusPort > 0 {
@@ -273,7 +318,10 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 // Start starts the Nitro Enclave.  If something goes wrong, the function
 // returns an error.
 func (e *Enclave) Start() error {
-	var err error
+	var (
+		err    error
+		leader = e.getLeader(pathHeartbeat)
+	)
 	errPrefix := "failed to start Nitro Enclave"
 
 	if inEnclave {
@@ -304,16 +352,177 @@ func (e *Enclave) Start() error {
 		return fmt.Errorf("%s: %w", errPrefix, err)
 	}
 
+	if !e.cfg.isScalingEnabled() {
+		return nil
+	}
+
+	// Check if we are the leader.
+	if !e.weAreLeader() {
+		elog.Println("Obtaining worker's hostname.")
+		worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
+		err = asWorker(e.setupWorkerPostSync, e.attester).registerWith(leader, worker)
+		if err != nil {
+			elog.Fatalf("Error syncing with leader: %v", err)
+		}
+	}
+
 	return nil
+}
+
+// getSyncState returns the enclave's key synchronization state.
+func (e *Enclave) getSyncState() int {
+	e.Lock()
+	defer e.Unlock()
+	return e.syncState
+}
+
+// setSyncState sets the enclave's key synchronization state.
+func (e *Enclave) setSyncState(state int) {
+	e.Lock()
+	defer e.Unlock()
+	e.syncState = state
+}
+
+// weAreLeader figures out if the enclave is the leader or worker.
+func (e *Enclave) weAreLeader() (result bool) {
+	var (
+		err         error
+		ourNonce    nonce
+		weAreLeader = make(chan struct{}, 1)
+		areWeLeader = make(chan bool)
+		errChan     = make(chan error)
+		leader      = e.getLeader(pathLeader)
+	)
+	defer func() {
+		elog.Printf("We are leader: %v", result)
+		if result {
+			e.setSyncState(isLeader)
+		} else {
+			e.setSyncState(isWorker)
+		}
+	}()
+
+	ourNonce, err = newNonce()
+	if err != nil {
+		elog.Fatalf("Error creating new nonce: %v", err)
+	}
+
+	m := e.extPrivSrv.Handler.(*chi.Mux)
+	m.Get(pathLeader, getLeaderHandler(ourNonce, weAreLeader))
+	// Reset the handler as we no longer have a need for it.
+	defer m.Get(pathLeader,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusGone)
+		},
+	)
+
+	timeout := time.NewTicker(10 * time.Second)
+	for {
+		go makeLeaderRequest(leader, ourNonce, areWeLeader, errChan)
+		select {
+		case <-e.stop:
+			return
+		case <-errChan:
+			elog.Println("Not yet able to talk to leader designation endpoint.")
+			time.Sleep(time.Second)
+			continue
+		case result = <-areWeLeader:
+			return
+		case <-weAreLeader:
+			e.setupLeader()
+			result = true
+			return
+		case <-timeout.C:
+			elog.Fatal("Timed out talking to leader designation endpoint.")
+		}
+	}
+}
+
+// setupWorkerPostSync performs necessary post-key synchronization tasks like
+// installing the given enclave keys and starting the heartbeat loop.
+func (e *Enclave) setupWorkerPostSync(keys *enclaveKeys) error {
+	e.keys.set(keys)
+	cert, err := tls.X509KeyPair(keys.NitridingCert, keys.NitridingKey)
+	if err != nil {
+		return err
+	}
+	e.httpsCert.set(&cert)
+
+	// Start our heartbeat.
+	worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
+	go e.workerHeartbeat(worker)
+
+	return nil
+}
+
+// setupLeader performs necessary setup tasks like starting the worker event
+// loop and installing leader-specific HTTP handlers.
+func (e *Enclave) setupLeader() {
+	go e.workers.start(e.stop)
+	// Make leader-specific endpoint available.
+	e.extPrivSrv.Handler.(*chi.Mux).Post(pathHeartbeat, heartbeatHandler(e))
+	elog.Println("Set up leader endpoint and started worker event loop.")
+}
+
+// workerHeartbeat periodically talks to the leader enclave to 1) let the leader
+// know that we're still alive, and 2) to compare key material.  If it turns out
+// that the leader has different key material than the worker, the worker
+// re-registers itself, which triggers key re-synchronization.
+func (e *Enclave) workerHeartbeat(worker *url.URL) {
+	elog.Println("Starting worker's heartbeat loop.")
+	defer elog.Println("Exiting worker's heartbeat loop.")
+	var (
+		leader = e.getLeader(pathHeartbeat)
+		timer  = time.NewTicker(time.Minute)
+		hbBody = heartbeatRequest{
+			WorkerHostname: worker.Host,
+		}
+	)
+
+	for {
+		select {
+		case <-e.stop:
+			return
+		case <-timer.C:
+			hbBody.HashedKeys = e.keys.hashAndB64()
+			body, err := json.Marshal(hbBody)
+			if err != nil {
+				elog.Printf("Error marshalling heartbeat request: %v", err)
+				e.metrics.heartbeats.With(badHb(err)).Inc()
+				continue
+			}
+
+			resp, err := newUnauthenticatedHTTPClient().Post(
+				leader.String(),
+				"text/plain",
+				bytes.NewReader(body),
+			)
+			if err != nil {
+				elog.Printf("Error posting heartbeat to leader: %v", err)
+				e.metrics.heartbeats.With(badHb(err)).Inc()
+				continue
+			}
+			if resp.StatusCode != http.StatusOK {
+				e.metrics.heartbeats.With(badHb(fmt.Errorf("got status code %d", resp.StatusCode))).Inc()
+				elog.Printf("Leader responded to heartbeat with status code %d.", resp.StatusCode)
+				continue
+			}
+			elog.Println("Successfully sent heartbeat to leader.")
+			e.metrics.heartbeats.With(goodHb).Inc()
+		}
+	}
 }
 
 // Stop stops the enclave.
 func (e *Enclave) Stop() error {
 	close(e.stop)
-	if err := e.privSrv.Shutdown(context.Background()); err != nil {
+	if err := e.intSrv.Shutdown(context.Background()); err != nil {
 		return err
 	}
-	if err := e.pubSrv.Shutdown(context.Background()); err != nil {
+	if err := e.extPubSrv.Shutdown(context.Background()); err != nil {
+		return err
+	}
+	if err := e.extPrivSrv.Shutdown(context.Background()); err != nil {
 		return err
 	}
 	if err := e.promSrv.Shutdown(context.Background()); err != nil {
@@ -326,9 +535,9 @@ func (e *Enclave) Stop() error {
 // via AF_INET or AF_VSOCK.
 func (e *Enclave) getExtListener() (net.Listener, error) {
 	if e.cfg.UseVsockForExtPort {
-		return vsock.Listen(uint32(e.cfg.ExtPort), nil)
+		return vsock.Listen(uint32(e.cfg.ExtPubPort), nil)
 	} else {
-		return net.Listen("tcp", fmt.Sprintf(":%d", e.cfg.ExtPort))
+		return net.Listen("tcp", fmt.Sprintf(":%d", e.cfg.ExtPubPort))
 	}
 }
 
@@ -345,11 +554,18 @@ func (e *Enclave) startWebServers() error {
 		}()
 	}
 
-	elog.Printf("Starting public (%s) and private (%s) Web servers.", e.pubSrv.Addr, e.privSrv.Addr)
 	go func() {
-		err := e.privSrv.ListenAndServe()
+		elog.Printf("Starting internal Web server at %s.", e.intSrv.Addr)
+		err := e.intSrv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			elog.Fatalf("Private Web server error: %v", err)
+		}
+	}()
+	go func() {
+		elog.Printf("Starting external private Web server at %s.", e.extPrivSrv.Addr)
+		err := e.extPrivSrv.ListenAndServeTLS("", "")
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			elog.Fatalf("External private Web server error: %v", err)
 		}
 	}()
 	go func() {
@@ -365,78 +581,38 @@ func (e *Enclave) startWebServers() error {
 			elog.Fatalf("Failed to listen on external port: %v", err)
 		}
 
-		err = e.pubSrv.ServeTLS(listener, "", "")
+		elog.Printf("Starting external public Web server at :%d.", e.cfg.ExtPubPort)
+		err = e.extPubSrv.ServeTLS(listener, "", "")
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			elog.Fatalf("Public Web server error: %v", err)
+			elog.Fatalf("External public Web server error: %v", err)
 		}
 	}()
 
 	return nil
 }
 
-// genSelfSignedCert creates and returns a self-signed TLS certificate based on
-// the given FQDN.  Some of the code below was taken from:
-// https://eli.thegreenplace.net/2021/go-https-servers-with-tls/
+// genSelfSignedCert creates and installs a self-signed certificate.
 func (e *Enclave) genSelfSignedCert() error {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return err
-	}
-	elog.Println("Generated private key for self-signed certificate.")
-
-	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
-	if err != nil {
-		return err
-	}
-	elog.Println("Generated serial number for self-signed certificate.")
-
-	template := x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Organization: []string{certificateOrg},
-		},
-		DNSNames:              []string{e.cfg.FQDN},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(certificateValidity),
-		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-	}
-
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
-	if err != nil {
-		return err
-	}
-	elog.Println("Created certificate from template.")
-
-	pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-	if pemCert == nil {
-		return errors.New("failed to encode certificate to PEM")
-	}
-	// Determine and set the certificate's fingerprint because we need to add
-	// the fingerprint to our Nitro attestation document.
-	if err := e.setCertFingerprint(pemCert); err != nil {
-		return err
-	}
-
-	privBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	if err != nil {
-		elog.Fatalf("Unable to marshal private key: %v", err)
-	}
-	pemKey := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
-	if pemKey == nil {
-		elog.Fatal("Failed to encode key to PEM.")
-	}
-
-	cert, err := tls.X509KeyPair(pemCert, pemKey)
+	cert, key, err := createCertificate(e.cfg.FQDN)
 	if err != nil {
 		return err
 	}
 
-	e.pubSrv.TLSConfig = &tls.Config{
-		Certificates: []tls.Certificate{cert},
+	if err := e.setCertFingerprint(cert); err != nil {
+		return err
 	}
+	e.keys.setNitridingKeys(key, cert)
+
+	tlsCert, err := tls.X509KeyPair(cert, key)
+	if err != nil {
+		return err
+	}
+	e.httpsCert.set(&tlsCert)
+	e.extPubSrv.TLSConfig = &tls.Config{
+		GetCertificate: e.httpsCert.get,
+	}
+	// Both servers share a TLS config.
+	e.extPrivSrv.TLSConfig = e.extPubSrv.TLSConfig.Clone()
 
 	return nil
 }
@@ -465,7 +641,7 @@ func (e *Enclave) setupAcme() error {
 		Prompt:     autocert.AcceptTOS,
 		HostPolicy: autocert.HostWhitelist([]string{e.cfg.FQDN}...),
 	}
-	e.pubSrv.TLSConfig = certManager.TLSConfig()
+	e.extPubSrv.TLSConfig = certManager.TLSConfig()
 
 	go func() {
 		var rawData []byte
@@ -493,6 +669,14 @@ func (e *Enclave) setupAcme() error {
 // it in attestation documents, to bind the enclave's certificate to the
 // attestation document.
 func (e *Enclave) setCertFingerprint(rawData []byte) error {
+	if e.cfg.MockCertFp != "" {
+		hash, err := hex.DecodeString(e.cfg.MockCertFp)
+		if err != nil {
+			return errors.New("failed to decode mock certificate fingerprint hex")
+		}
+		copy(e.hashes.tlsKeyHash[:], hash)
+		return nil
+	}
 	rest := []byte{}
 	for rest != nil {
 		block, rest := pem.Decode(rawData)
@@ -516,27 +700,25 @@ func (e *Enclave) setCertFingerprint(rawData []byte) error {
 	return nil
 }
 
-// SetKeyMaterial registers the enclave's key material (e.g., secret encryption
-// keys) as being ready to be synchronized to other, identical enclaves.  Note
-// that the key material's underlying data structure must be marshallable to
-// JSON.
-//
-// This is only necessary if you intend to scale enclaves horizontally.  If you
-// will only ever run a single enclave, ignore this function.
-func (e *Enclave) SetKeyMaterial(keyMaterial any) {
-	e.Lock()
-	defer e.Unlock()
-
-	e.keyMaterial = keyMaterial
+// getLeader returns the leader enclave's URL.
+func (e *Enclave) getLeader(path string) *url.URL {
+	return &url.URL{
+		Scheme: "https",
+		Host:   fmt.Sprintf("%s:%d", e.cfg.FQDNLeader, e.cfg.ExtPrivPort),
+		Path:   path,
+	}
 }
 
-// KeyMaterial returns the key material or, if none was registered, an error.
-func (e *Enclave) KeyMaterial() (any, error) {
-	e.RLock()
-	defer e.RUnlock()
-
-	if e.keyMaterial == nil {
-		return nil, errNoKeyMaterial
+// getWorker takes as input the worker's heartbeat request payload and returns
+// the worker's URL.
+func (e *Enclave) getWorker(hb *heartbeatRequest) (*url.URL, error) {
+	var (
+		host string
+		err  error
+	)
+	host, _, err = net.SplitHostPort(hb.WorkerHostname)
+	if err != nil {
+		return nil, err
 	}
-	return e.keyMaterial, nil
+	return getSyncURL(host, e.cfg.ExtPrivPort), nil
 }

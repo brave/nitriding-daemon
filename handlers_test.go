@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,18 +13,28 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 )
 
-// makeRequestFor is a helper function that creates an HTTP request.
-func makeRequestFor(srv *http.Server) func(method, path string, body io.Reader) *http.Response {
+func makeReqToSrv(srv *http.Server) func(method, path string, body io.Reader) *http.Response {
 	return func(method, path string, body io.Reader) *http.Response {
 		req := httptest.NewRequest(method, path, body)
 		rec := httptest.NewRecorder()
 		srv.Handler.ServeHTTP(rec, req)
 		return rec.Result()
+	}
+}
+
+func makeReqToHandler(handler http.HandlerFunc) func(method, path string, body io.Reader) *http.Response {
+	return func(method, path string, body io.Reader) *http.Response {
+		req := httptest.NewRequest(method, path, body)
+		w := httptest.NewRecorder()
+		handler(w, req)
+		return w.Result()
 	}
 }
 
@@ -33,6 +44,26 @@ func newResp(status int, body string) *http.Response {
 		StatusCode: status,
 		Body:       io.NopCloser(bytes.NewBufferString(body)),
 	}
+}
+
+func retState(state int) func() int {
+	return func() int {
+		return state
+	}
+}
+
+// keysToHeartbeat turns the given keys into a Buffer that contains a heartbeat
+// request.
+func keysToHeartbeat(t *testing.T, keys *enclaveKeys) *bytes.Buffer {
+	t.Helper()
+	blob, err := json.Marshal(&heartbeatRequest{
+		HashedKeys:     keys.hashAndB64(),
+		WorkerHostname: "localhost:1234",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.NewBuffer(blob)
 }
 
 // assertResponse ensures that the two given HTTP responses are (almost)
@@ -67,7 +98,7 @@ func assertResponse(t *testing.T, actual, expected *http.Response) {
 }
 
 func TestRootHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).pubSrv)
+	makeReq := makeReqToSrv(createEnclave(&defaultCfg).extPubSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathRoot, nil),
@@ -79,7 +110,7 @@ func TestRootHandler(t *testing.T) {
 // instructing it to spin up its Internet-facing Web server.
 func signalReady(t *testing.T, e *Enclave) {
 	t.Helper()
-	makeReq := makeRequestFor(e.privSrv)
+	makeReq := makeReqToSrv(e.intSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathReady, nil),
@@ -93,53 +124,98 @@ func signalReady(t *testing.T, e *Enclave) {
 	time.Sleep(100 * time.Millisecond)
 }
 
-func TestSyncHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).privSrv)
+func TestGetStateHandler(t *testing.T) {
+	var keys = newTestKeys(t)
 
+	makeReq := makeReqToHandler(getStateHandler(retState(noSync), keys))
 	assertResponse(t,
-		makeReq(http.MethodGet, pathSync, nil),
-		newResp(http.StatusBadRequest, errNoAddr.Error()),
+		makeReq(http.MethodGet, pathState, nil),
+		newResp(http.StatusForbidden, errKeySyncDisabled.Error()),
 	)
 
+	makeReq = makeReqToHandler(getStateHandler(retState(isLeader), keys))
 	assertResponse(t,
-		makeReq(http.MethodGet, pathSync+"?addr=:foo", nil),
-		newResp(http.StatusBadRequest, errBadSyncAddr.Error()),
+		makeReq(http.MethodGet, pathState, nil),
+		newResp(http.StatusGone, errEndpointGone.Error()),
 	)
 
+	makeReq = makeReqToHandler(getStateHandler(retState(isWorker), keys))
 	assertResponse(t,
-		makeReq(http.MethodGet, pathSync+"?addr=foobar", nil),
-		newResp(http.StatusInternalServerError, ""), // The exact error is convoluted, so we skip comparison.
+		makeReq(http.MethodGet, pathState, nil),
+		newResp(http.StatusOK, string(keys.getAppKeys())),
+	)
+
+	makeReq = makeReqToHandler(getStateHandler(retState(inProgress), keys))
+	assertResponse(t,
+		makeReq(http.MethodGet, pathState, nil),
+		newResp(http.StatusServiceUnavailable, errDesignationInProgress.Error()),
 	)
 }
 
-func TestStateHandlers(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).privSrv)
+func TestPutStateHandler(t *testing.T) {
+	var (
+		tooLargeKey       = make([]byte, maxKeyMaterialLen+1)
+		almostTooLargeKey = make([]byte, maxKeyMaterialLen)
+		a                 = &dummyAttester{}
+		keys              = newTestKeys(t)
+		stop              = make(chan struct{})
+		workers           = newWorkerManager(time.Second)
+	)
+	go workers.start(stop)
+	defer close(stop)
 
-	tooLargeKey := make([]byte, 1024*1024+1)
+	makeReq := makeReqToHandler(putStateHandler(a, retState(noSync), keys, workers))
+	assertResponse(t,
+		makeReq(http.MethodPut, pathState, strings.NewReader("appKeys")),
+		newResp(http.StatusForbidden, errKeySyncDisabled.Error()),
+	)
+
+	makeReq = makeReqToHandler(putStateHandler(a, retState(isWorker), keys, workers))
+	assertResponse(t,
+		makeReq(http.MethodPut, pathState, strings.NewReader("appKeys")),
+		newResp(http.StatusGone, errEndpointGone.Error()),
+	)
+
+	makeReq = makeReqToHandler(putStateHandler(a, retState(inProgress), keys, workers))
+	assertResponse(t,
+		makeReq(http.MethodPut, pathState, strings.NewReader("appKeys")),
+		newResp(http.StatusServiceUnavailable, errDesignationInProgress.Error()),
+	)
+
+	makeReq = makeReqToHandler(putStateHandler(a, retState(isLeader), keys, workers))
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, bytes.NewReader(tooLargeKey)),
 		newResp(http.StatusInternalServerError, errFailedReqBody.Error()),
 	)
-
-	// As long as we don't hit our (generous) upload limit, we always expect an
-	// HTTP 200 response.
-	almostTooLargeKey := make([]byte, 1024*1024)
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, bytes.NewReader(almostTooLargeKey)),
 		newResp(http.StatusOK, ""),
 	)
+}
 
-	// Subsequent calls to the endpoint overwrite the previous call.
-	expected := []byte("foobar")
+func TestGetPutStateHandlers(t *testing.T) {
+	var (
+		a       = &dummyAttester{}
+		keys    = newTestKeys(t)
+		appKeys = "application keys"
+		stop    = make(chan struct{})
+		workers = newWorkerManager(time.Second)
+	)
+	go workers.start(stop)
+	defer close(stop)
+
+	// Set application state.
+	makeReq := makeReqToHandler(putStateHandler(a, retState(isLeader), keys, workers))
 	assertResponse(t,
-		makeReq(http.MethodPut, pathState, bytes.NewReader(expected)),
+		makeReq(http.MethodPut, pathState, strings.NewReader(appKeys)),
 		newResp(http.StatusOK, ""),
 	)
 
-	// Now retrieve the state and make sure that it's what we sent earlier.
+	// Retrieve previously-set application state.
+	makeReq = makeReqToHandler(getStateHandler(retState(isWorker), keys))
 	assertResponse(t,
 		makeReq(http.MethodGet, pathState, nil),
-		newResp(http.StatusOK, string(expected)),
+		newResp(http.StatusOK, appKeys),
 	)
 }
 
@@ -172,7 +248,7 @@ func TestProxyHandler(t *testing.T) {
 	// Skip certificate validation because we are using a self-signed
 	// certificate in this test.
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	nitridingSrv := "https://127.0.0.1" + e.pubSrv.Addr
+	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPubPort)
 
 	// Request the enclave's index page.  Nitriding is going to return it.
 	resp, err := http.Get(nitridingSrv + pathRoot)
@@ -194,7 +270,7 @@ func TestHashHandler(t *testing.T) {
 	validHash := [sha256.Size]byte{}
 	validHashB64 := base64.StdEncoding.EncodeToString(validHash[:])
 	e := createEnclave(&defaultCfg)
-	makeReq := makeRequestFor(e.privSrv)
+	makeReq := makeReqToSrv(e.intSrv)
 
 	// Send invalid Base64.
 	assertResponse(t,
@@ -242,7 +318,7 @@ func TestReadiness(t *testing.T) {
 	}
 	defer e.Stop() //nolint:errcheck
 
-	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPort)
+	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPubPort)
 	u := nitridingSrv + pathRoot
 	// Make sure that the Internet-facing Web server is already running because
 	// we didn't ask nitriding to wait for the application.  The Web server may
@@ -269,7 +345,7 @@ func TestReadiness(t *testing.T) {
 	}(t, u)
 }
 
-func TestReadyHandler(t *testing.T) {
+func TestReadinessWithWaitForUp(t *testing.T) {
 	cfg := defaultCfg
 	cfg.WaitForApp = true
 	e := createEnclave(&cfg)
@@ -279,7 +355,7 @@ func TestReadyHandler(t *testing.T) {
 	defer e.Stop() //nolint:errcheck
 
 	// Check if the Internet-facing Web server is running.
-	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPort)
+	nitridingSrv := fmt.Sprintf("https://127.0.0.1:%d", e.cfg.ExtPubPort)
 	_, err := http.Get(nitridingSrv + pathRoot)
 	if !errors.Is(err, syscall.ECONNREFUSED) {
 		t.Fatal("Expected 'connection refused'.")
@@ -296,20 +372,47 @@ func TestReadyHandler(t *testing.T) {
 	}
 }
 
+func TestReadyHandler(t *testing.T) {
+	var (
+		ready = make(chan struct{})
+		wg    sync.WaitGroup
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ready
+	}()
+
+	makeReq := makeReqToHandler(readyHandler(ready))
+	assertResponse(t,
+		makeReq(http.MethodGet, pathReady, nil),
+		newResp(http.StatusOK, ""),
+	)
+	wg.Wait()
+
+	// Subsequent calls should return 410 Gone.
+	assertResponse(t,
+		makeReq(http.MethodGet, pathReady, nil),
+		newResp(http.StatusGone, ""),
+	)
+}
+
 func TestAttestationHandlerWhileProfiling(t *testing.T) {
 	cfg := defaultCfg
 	cfg.UseProfiling = true
-	makeReq := makeRequestFor(createEnclave(&cfg).pubSrv)
+	makeReq := makeReqToSrv(createEnclave(&cfg).extPubSrv)
 
 	// Ensure that the attestation handler aborts if profiling is enabled.
 	assertResponse(t,
 		makeReq(http.MethodGet, pathAttestation, nil),
-		newResp(http.StatusServiceUnavailable, errProfilingSet),
+		newResp(http.StatusServiceUnavailable, errProfilingSet.Error()),
 	)
 }
 
 func TestAttestationHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).pubSrv)
+	prodCfg := defaultCfg
+	prodCfg.Debug = false
+	makeReq := makeReqToSrv(createEnclave(&prodCfg).extPubSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodPost, pathAttestation, nil),
@@ -318,12 +421,12 @@ func TestAttestationHandler(t *testing.T) {
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathAttestation, nil),
-		newResp(http.StatusBadRequest, errNoNonce),
+		newResp(http.StatusBadRequest, errNoNonce.Error()),
 	)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathAttestation+"?nonce=foobar", nil),
-		newResp(http.StatusBadRequest, errBadNonceFormat),
+		newResp(http.StatusBadRequest, errBadNonceFormat.Error()),
 	)
 
 	// If we are not inside an enclave, attestation is going to result in an
@@ -331,16 +434,114 @@ func TestAttestationHandler(t *testing.T) {
 	if !inEnclave {
 		assertResponse(t,
 			makeReq(http.MethodGet, pathAttestation+"?nonce=0000000000000000000000000000000000000000", nil),
-			newResp(http.StatusInternalServerError, errFailedAttestation),
+			newResp(http.StatusInternalServerError, errFailedAttestation.Error()),
 		)
 	}
 }
 
 func TestConfigHandler(t *testing.T) {
-	makeReq := makeRequestFor(createEnclave(&defaultCfg).pubSrv)
+	makeReq := makeReqToSrv(createEnclave(&defaultCfg).extPubSrv)
 
 	assertResponse(t,
 		makeReq(http.MethodGet, pathConfig, nil),
 		newResp(http.StatusOK, defaultCfg.String()),
+	)
+}
+
+func TestHeartbeatHandler(t *testing.T) {
+	var (
+		e       = createEnclave(&defaultCfg)
+		keys    = newTestKeys(t)
+		makeReq = makeReqToSrv(e.extPrivSrv)
+	)
+	e.setupLeader()
+	e.keys.set(keys)
+
+	tooLargeBuf := bytes.NewBuffer(make([]byte, maxHeartbeatBody+1))
+	assertResponse(t,
+		makeReq(http.MethodPost, pathHeartbeat, tooLargeBuf),
+		newResp(http.StatusInternalServerError, errFailedReqBody.Error()),
+	)
+
+	assertResponse(t,
+		makeReq(http.MethodPost, pathHeartbeat, keysToHeartbeat(t, keys)),
+		newResp(http.StatusOK, ""),
+	)
+}
+
+func TestHeartbeatHandlerWithSync(t *testing.T) {
+	var (
+		wg            = sync.WaitGroup{}
+		leaderEnclave = createEnclave(&defaultCfg)
+		makeReq       = makeReqToSrv(leaderEnclave.extPrivSrv)
+		workerKeys    = newTestKeys(t)
+		setWorkerKeys = func(keys *enclaveKeys) error {
+			defer wg.Done()
+			workerKeys.set(keys)
+			return nil
+		}
+		worker    = asWorker(setWorkerKeys, &dummyAttester{})
+		workerSrv = httptest.NewTLSServer(worker)
+	)
+	defer workerSrv.Close()
+	if err := leaderEnclave.Start(); err != nil {
+		t.Fatal(err)
+	}
+	leaderEnclave.setupLeader()
+	wg.Add(1)
+
+	// Mock two functions to make the leader enclave talk to our test server.
+	newUnauthenticatedHTTPClient = workerSrv.Client
+	getSyncURL = func(host string, port uint16) *url.URL {
+		u, err := url.Parse(workerSrv.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+
+	assertEqual(t, leaderEnclave.workers.length(), 0)
+
+	// Send a heartbeat to the leader.  The heartbeat's keys don't match the
+	// leader's keys, which results in the leader initiating key
+	// synchronization.
+	assertResponse(t,
+		makeReq(http.MethodPost, pathHeartbeat, keysToHeartbeat(t, workerKeys)),
+		newResp(http.StatusOK, ""),
+	)
+
+	// Wait until the worker's keys were set and make sure that the keys were
+	// synchronized successfully.
+	wg.Wait()
+	assertEqual(t, leaderEnclave.keys.equal(workerKeys), true)
+}
+
+func TestGetLeaderHandler(t *testing.T) {
+	var (
+		weAreLeader      = make(chan struct{})
+		unexpectedSuffix = "?nonce=0000000000000000000000000000000000000000"
+	)
+	nonce, err := newNonce()
+	failOnErr(t, err)
+
+	// Don't provide the expected nonce.
+	makeReq := makeReqToHandler(getLeaderHandler(nonce, weAreLeader))
+	assertResponse(t,
+		makeReq(http.MethodGet, pathLeader, nil),
+		newResp(http.StatusBadRequest, errNoNonce.Error()),
+	)
+
+	// Send an unexpected nonce.
+	assertResponse(t,
+		makeReq(http.MethodGet, pathLeader+unexpectedSuffix, nil),
+		newResp(http.StatusOK, ""),
+	)
+
+	// Send the expected nonce.
+	go func() { <-weAreLeader }()
+	suffix := fmt.Sprintf("?nonce=%x", nonce)
+	assertResponse(t,
+		makeReq(http.MethodGet, pathLeader+suffix, nil),
+		newResp(http.StatusOK, ""),
 	)
 }

@@ -3,11 +3,22 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"testing"
 
 	"golang.org/x/crypto/acme/autocert"
 )
+
+func TestPrematureGet(t *testing.T) {
+	var (
+		err error
+		r   = new(certRetriever)
+	)
+
+	_, err = r.get(new(tls.ClientHelloInfo))
+	assertEqual(t, err, errUninitializedCert)
+}
 
 func TestGet(t *testing.T) {
 	var err error

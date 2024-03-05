@@ -1,0 +1,32 @@
+name: security
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+jobs:
+  security:
+    name: security
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # CodeQL analyzed languages
+      matrix:
+        language: [ 'generic', 'javascript', 'python', 'ruby', 'go' ]
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+        with:
+          fetch-depth: 0
+      - uses: brave/security-action@main
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          slack_token: ${{ secrets.HOTSPOTS_SLACK_TOKEN }} # optional
+          # by default assignees will be thypon and bcaller, modify accordingly
+          assignees: |
+            kdenhartog
+            thypon
+            bcaller
+          codeql_config: ./.github/codeql/codeql-config.yml # optional
