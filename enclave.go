@@ -252,8 +252,10 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	// critical to boosting the requests per second that our reverse proxy can
 	// sustain.  See the following comment for more details:
 	// https://github.com/brave/nitriding-daemon/issues/2#issuecomment-1530245059
-	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 500
-	http.DefaultTransport.(*http.Transport).MaxIdleConns = 500
+	customTransport := &http.Transport{
+		MaxIdleConns:        500,
+		MaxIdleConnsPerHost: 500,
+	}
 
 	if cfg.Debug {
 		e.attester = &dummyAttester{}
@@ -300,6 +302,7 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	if cfg.AppWebSrv != nil {
 		e.revProxy = httputil.NewSingleHostReverseProxy(cfg.AppWebSrv)
 		e.revProxy.BufferPool = newBufPool()
+		e.revProxy.Transport = customTransport
 		e.extPubSrv.Handler.(*chi.Mux).Handle(pathProxy, e.revProxy)
 		// If we expose Prometheus metrics, we keep track of the HTTP backend's
 		// responses.
