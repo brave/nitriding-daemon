@@ -10,16 +10,18 @@ import (
 )
 
 const (
-	hashPrefix    = "sha256:"
-	hashSeparator = ";"
+	nonceNumDigits = nonceLen * 2 // The number of hex digits in a nonce.
 )
 
 var (
 	errBadForm           = errors.New("failed to parse POST form data")
 	errNoNonce           = errors.New("could not find nonce in URL query parameters")
-	errBadNonceFormat    = fmt.Errorf("unexpected nonce format; must be %d-digit hex string", nonceLen*2)
+	errBadNonceFormat    = fmt.Errorf("unexpected nonce format; must be %d-digit hex string", nonceNumDigits)
 	errFailedAttestation = errors.New("failed to obtain attestation document from hypervisor")
 	errProfilingSet      = errors.New("attestation disabled because profiling is enabled")
+
+	// Multihash prefix marks the hash type and digest size
+	hashPrefix = []byte{0x12, sha256.Size}
 
 	// getPCRValues is a variable pointing to a function that returns PCR
 	// values.  Using a variable allows us to easily mock the function in our
@@ -34,17 +36,14 @@ type AttestationHashes struct {
 	appKeyHash [sha256.Size]byte // Sometimes set, depending on application.
 }
 
-// Serialize returns a byte slice that contains our concatenated hashes.  Note
-// that all hashes are always present.  If a hash was not initialized, it's set
-// to 0-bytes.
+// Serialize returns a byte slice that contains our concatenated hashes.
+// hashPrefix defines the hash type and length.  Note that all hashes are
+// always present.  If a hash was not initialized, it's set to 0-bytes.
 func (a *AttestationHashes) Serialize() []byte {
-	str := fmt.Sprintf("%s%s%s%s%s",
-		hashPrefix,
-		a.tlsKeyHash,
-		hashSeparator,
-		hashPrefix,
-		a.appKeyHash)
-	return []byte(str)
+	ser := []byte{}
+	ser = append(ser, append(hashPrefix, a.tlsKeyHash[:]...)...)
+	ser = append(ser, append(hashPrefix, a.appKeyHash[:]...)...)
+	return ser
 }
 
 // _getPCRValues returns the enclave's platform configuration register (PCR)

@@ -27,4 +27,4 @@ nitro-cli run-enclave \
 	--attach-console
 
 echo "[ec2] Stopping gvproxy."
-sudo pkill -INT -P "$pid"
+sudo kill -INT "$pid"
