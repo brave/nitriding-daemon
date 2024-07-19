@@ -16,6 +16,7 @@ import (
 	"net/http/httputil"
 	_ "net/http/pprof"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -65,20 +66,22 @@ var (
 // Enclave represents a service running inside an AWS Nitro Enclave.
 type Enclave struct {
 	attester
-	sync.Mutex            // Guard syncState.
-	cfg                   *Config
-	syncState             int
-	extPubSrv, extPrivSrv *http.Server
-	intSrv                *http.Server
-	promSrv               *http.Server
-	revProxy              *httputil.ReverseProxy
-	hashes                *AttestationHashes
-	promRegistry          *prometheus.Registry
-	metrics               *metrics
-	workers               *workerManager
-	keys                  *enclaveKeys
-	httpsCert             *certRetriever
-	ready, stop           chan struct{}
+	sync.Mutex                   // Guard syncState.
+	cfg                          *Config
+	syncState                    int
+	extPubSrv, extPrivSrv        *http.Server
+	intSrv                       *http.Server
+	promSrv                      *http.Server
+	revProxy                     *httputil.ReverseProxy
+	hashes                       *AttestationHashes
+	promRegistry                 *prometheus.Registry
+	metrics                      *metrics
+	workers                      *workerManager
+	keys                         *enclaveKeys
+	httpsCert                    *certRetriever
+	appReady, networkReady, stop chan struct{}
+	heartbeatActive              bool
+	myHostname                   string
 }
 
 // Config represents the configuration of our enclave service.
@@ -88,7 +91,7 @@ type Config struct {
 	// is required.
 	FQDN string
 
-	// FQDNLeader contains the fully qualified domain name of the leader
+	// FQDNLeader contains the fully qualified domain name and port of the leader
 	// enclave, which coordinates enclave synchronization.  Only set this field
 	// if horizontal scaling is required.
 	FQDNLeader string
@@ -132,6 +135,10 @@ type Config struct {
 	// PrometheusNamespace specifies the namespace for exported Prometheus
 	// metrics.  Consider setting this to your application's name.
 	PrometheusNamespace string
+
+	// Port of the host IP provider, provided by vsock-relay.
+	// Only required if key synchronization is enabled.
+	HostIpProviderPort uint32
 
 	// UseProfiling enables profiling via pprof.  Profiling information will be
 	// available at /enclave/debug.  Note that profiling data is privacy
@@ -245,7 +252,8 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		hashes:       new(AttestationHashes),
 		workers:      newWorkerManager(time.Minute),
 		stop:         make(chan struct{}),
-		ready:        make(chan struct{}),
+		appReady:     make(chan struct{}),
+		networkReady: make(chan struct{}),
 	}
 
 	// Increase the maximum number of idle connections per host.  This is
@@ -291,9 +299,8 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 	// Register enclave-internal HTTP API.
 	m = e.intSrv.Handler.(*chi.Mux)
 	if cfg.WaitForApp {
-		m.Get(pathReady, readyHandler(e.ready))
+		m.Get(pathReady, readyHandler(e.appReady))
 	}
-	m.Get(pathState, getStateHandler(e.getSyncState, e.keys))
 	m.Put(pathState, putStateHandler(e.attester, e.getSyncState, e.keys, e.workers))
 	m.Post(pathHash, hashHandler(e))
 
@@ -303,7 +310,11 @@ func NewEnclave(cfg *Config) (*Enclave, error) {
 		e.revProxy = httputil.NewSingleHostReverseProxy(cfg.AppWebSrv)
 		e.revProxy.BufferPool = newBufPool()
 		e.revProxy.Transport = customTransport
-		e.extPubSrv.Handler.(*chi.Mux).Handle(pathProxy, e.revProxy)
+		extm := e.extPubSrv.Handler.(*chi.Mux)
+		extm.Handle(pathState, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+		}))
+		extm.Handle(pathProxy, e.revProxy)
 		// If we expose Prometheus metrics, we keep track of the HTTP backend's
 		// responses.
 		if cfg.PrometheusPort > 0 {
@@ -336,7 +347,7 @@ func (e *Enclave) Start() error {
 
 	// Set up our networking environment which creates a TAP device that
 	// forwards traffic (via the VSOCK interface) to the EC2 host.
-	go runNetworking(e.cfg, e.stop)
+	go runNetworking(e.cfg, e.stop, e.networkReady)
 
 	// Get an HTTPS certificate.
 	if e.cfg.UseACME {
@@ -356,13 +367,23 @@ func (e *Enclave) Start() error {
 		return nil
 	}
 
+	elog.Println("Waiting for networking setup...")
+	<-e.networkReady
 	// Check if we are the leader.
 	if !e.weAreLeader() {
+		// Get the worker's hostname/IP, so we can give the leader
+		// enclave contact details for future sync attempts.
 		elog.Println("Obtaining worker's hostname.")
-		worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
+		e.myHostname = getHostnameOrDie(e.cfg.HostIpProviderPort)
+		worker := getSyncURL(e.myHostname, e.cfg.ExtPrivPort)
 		err = asWorker(e.setupWorkerPostSync, e.attester).registerWith(leader, worker)
 		if err != nil {
 			elog.Fatalf("Error syncing with leader: %v", err)
+		}
+	} else {
+		// Get leader app key to share with worker enclaves.
+		if err = requestAndStoreKeyFromApp(e.cfg.AppWebSrv, e.keys); err != nil {
+			elog.Fatalf("Failed to retrieve key material from app as leader: %v", err)
 		}
 	}
 
@@ -424,7 +445,6 @@ func (e *Enclave) weAreLeader() (result bool) {
 			return
 		case <-errChan:
 			elog.Println("Not yet able to talk to leader designation endpoint.")
-			time.Sleep(time.Second)
 			continue
 		case result = <-areWeLeader:
 			return
@@ -442,15 +462,23 @@ func (e *Enclave) weAreLeader() (result bool) {
 // installing the given enclave keys and starting the heartbeat loop.
 func (e *Enclave) setupWorkerPostSync(keys *enclaveKeys) error {
 	e.keys.set(keys)
+
+	if err := sendKeyToApp(e.cfg.AppWebSrv, e.keys); err != nil {
+		return err
+	}
+
 	cert, err := tls.X509KeyPair(keys.NitridingCert, keys.NitridingKey)
 	if err != nil {
 		return err
 	}
 	e.httpsCert.set(&cert)
 
-	// Start our heartbeat.
-	worker := getSyncURL(getHostnameOrDie(), e.cfg.ExtPrivPort)
-	go e.workerHeartbeat(worker)
+	if !e.heartbeatActive {
+		worker := getSyncURL(e.myHostname, e.cfg.ExtPrivPort)
+
+		go e.workerHeartbeat(worker)
+		e.heartbeatActive = true
+	}
 
 	return nil
 }
@@ -516,6 +544,7 @@ func (e *Enclave) workerHeartbeat(worker *url.URL) {
 // Stop stops the enclave.
 func (e *Enclave) Stop() error {
 	close(e.stop)
+	e.heartbeatActive = false
 	if err := e.intSrv.Shutdown(context.Background()); err != nil {
 		return err
 	}
@@ -533,11 +562,11 @@ func (e *Enclave) Stop() error {
 
 // getExtListener returns a listener for the HTTPS service
 // via AF_INET or AF_VSOCK.
-func (e *Enclave) getExtListener() (net.Listener, error) {
+func (e *Enclave) getExtListener(port uint16) (net.Listener, error) {
 	if e.cfg.UseVsockForExtPort {
-		return vsock.Listen(uint32(e.cfg.ExtPubPort), nil)
+		return vsock.Listen(uint32(port), nil)
 	} else {
-		return net.Listen("tcp", fmt.Sprintf(":%d", e.cfg.ExtPubPort))
+		return net.Listen("tcp", fmt.Sprintf(":%d", port))
 	}
 }
 
@@ -562,8 +591,12 @@ func (e *Enclave) startWebServers() error {
 		}
 	}()
 	go func() {
+		listener, err := e.getExtListener(e.cfg.ExtPrivPort)
+		if err != nil {
+			elog.Fatalf("Failed to listen on external port: %v", err)
+		}
 		elog.Printf("Starting external private Web server at %s.", e.extPrivSrv.Addr)
-		err := e.extPrivSrv.ListenAndServeTLS("", "")
+		err = e.extPrivSrv.ServeTLS(listener, "", "")
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			elog.Fatalf("External private Web server error: %v", err)
 		}
@@ -572,11 +605,11 @@ func (e *Enclave) startWebServers() error {
 		// If desired, don't launch our Internet-facing Web server until the
 		// application signalled that it's ready.
 		if e.cfg.WaitForApp {
-			<-e.ready
+			<-e.appReady
 			elog.Println("Application signalled that it's ready.  Starting public Web server.")
 		}
 
-		listener, err := e.getExtListener()
+		listener, err := e.getExtListener(e.cfg.ExtPubPort)
 		if err != nil {
 			elog.Fatalf("Failed to listen on external port: %v", err)
 		}
@@ -704,7 +737,7 @@ func (e *Enclave) setCertFingerprint(rawData []byte) error {
 func (e *Enclave) getLeader(path string) *url.URL {
 	return &url.URL{
 		Scheme: "https",
-		Host:   fmt.Sprintf("%s:%d", e.cfg.FQDNLeader, e.cfg.ExtPrivPort),
+		Host:   e.cfg.FQDNLeader,
 		Path:   path,
 	}
 }
@@ -712,13 +745,15 @@ func (e *Enclave) getLeader(path string) *url.URL {
 // getWorker takes as input the worker's heartbeat request payload and returns
 // the worker's URL.
 func (e *Enclave) getWorker(hb *heartbeatRequest) (*url.URL, error) {
-	var (
-		host string
-		err  error
-	)
-	host, _, err = net.SplitHostPort(hb.WorkerHostname)
+	host, port, err := net.SplitHostPort(hb.WorkerHostname)
 	if err != nil {
 		return nil, err
 	}
-	return getSyncURL(host, e.cfg.ExtPrivPort), nil
+	portUint, err := strconv.ParseUint(port, 10, 16)
+	if err != nil {
+		return nil, fmt.Errorf("invalid port number: %v", err)
+	}
+	portUint16 := uint16(portUint)
+
+	return getSyncURL(host, portUint16), nil
 }

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -17,11 +20,33 @@ var defaultCfg = Config{
 	WaitForApp:    true,
 }
 
+type mockAppRequestInfo struct {
+	method string
+	path   string
+	body   []byte
+}
+
 func assertEqual(t *testing.T, is, should interface{}) {
 	t.Helper()
 	if should != is {
 		t.Fatalf("Expected value\n%v\nbut got\n%v", should, is)
 	}
+}
+
+func createMockServer(responseBody []byte, mockAppRequests *[]mockAppRequestInfo) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+
+		*mockAppRequests = append(*mockAppRequests, mockAppRequestInfo{
+			method: r.Method,
+			path:   r.URL.Path,
+			body:   body,
+		})
+		w.WriteHeader(http.StatusOK)
+		if responseBody != nil {
+			_, _ = w.Write(responseBody)
+		}
+	}))
 }
 
 func createEnclave(cfg *Config) *Enclave {
