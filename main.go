@@ -96,9 +96,6 @@ func main() {
 	if prometheusPort > math.MaxUint16 {
 		elog.Fatalf("-prometheus-port must be in interval [1, %d]", math.MaxUint16)
 	}
-	if prometheusPort != 0 && prometheusNamespace == "" {
-		elog.Fatalf("-prometheus-namespace must be set when Prometheus is used.")
-	}
 
 	c := &Config{
 		FQDN:                fqdn,

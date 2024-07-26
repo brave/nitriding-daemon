@@ -576,7 +576,11 @@ func (e *Enclave) startWebServers() error {
 	if e.cfg.PrometheusPort > 0 {
 		elog.Printf("Starting Prometheus Web server (%s).", e.promSrv.Addr)
 		go func() {
-			err := e.promSrv.ListenAndServe()
+			listener, err := e.getExtListener(e.cfg.PrometheusPort)
+			if err != nil {
+				elog.Fatalf("Failed to listen on Prometheus port: %v", err)
+			}
+			err = e.promSrv.Serve(listener)
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				elog.Fatalf("Prometheus Web server error: %v", err)
 			}
