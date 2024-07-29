@@ -472,6 +472,9 @@ func (e *Enclave) setupWorkerPostSync(keys *enclaveKeys) error {
 		return err
 	}
 	e.httpsCert.set(&cert)
+	if err = e.setCertFingerprint(keys.NitridingCert); err != nil {
+		return err
+	}
 
 	if !e.heartbeatActive {
 		worker := getSyncURL(e.myHostname, e.cfg.ExtPrivPort)
