@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -18,14 +19,14 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/mdlayher/vsock"
 )
 
 const (
-	// The endpoint of AWS's Instance Metadata Service, which allows an enclave
-	// to learn its internal hostname:
-	// https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html
-	metadataSvcToken = "http://169.254.169.254/latest/api/token"
-	metadataSvcInfo  = "http://169.254.169.254/latest/meta-data/local-hostname"
+	maxIPResponseSize     = 32
+	maxKeyMaterialSize    = 256 * 1024
+	maxHostnameReqSeconds = 5
 )
 
 var (
@@ -131,10 +132,10 @@ func sliceToNonce(s []byte) (nonce, error) {
 }
 
 // getHostnameOrDie returns the "enclave"'s hostname (or IP address) or dies
-// trying.  If inside an enclave, we query AWS's Instance Metadata Service.  If
-// outside an enclave, we pick whatever IP address the operating system would
+// trying.  If inside an enclave, we query the host IP provider, provided by vsock-relay.
+// If outside an enclave, we pick whatever IP address the operating system would
 // choose when talking to a public IP address.
-func getHostnameOrDie() (hostname string) {
+func getHostnameOrDie(hostIpProviderPort uint32) (hostname string) {
 	defer func() {
 		elog.Printf("Determined our hostname: %s", hostname)
 	}()
@@ -147,10 +148,10 @@ func getHostnameOrDie() (hostname string) {
 
 	// We cannot easily tell when all components are in place to receive
 	// incoming connections.  We therefore make five attempts to get our
-	// hostname from IMDS while waiting for one second in between attempts.
+	// hostname from the host IP provider while waiting for one second in between attempts.
 	const retries = 5
 	for i := 0; i < retries; i++ {
-		hostname, err = getLocalEC2Hostname()
+		hostname, err = getLocalEC2Hostname(hostIpProviderPort)
 		if err == nil {
 			return
 		}
@@ -177,44 +178,27 @@ func getLocalAddr() string {
 	return host
 }
 
-func getLocalEC2Hostname() (string, error) {
-	const (
-		maxTokenLen    = 100
-		maxHostnameLen = 255
-	)
-	// IMDSv2, which we are using, is session-oriented (God knows why), so we
-	// first obtain a session token from the service.
-	req, err := http.NewRequest(http.MethodPut, metadataSvcToken, nil)
+func getLocalEC2Hostname(hostIpProviderPort uint32) (string, error) {
+	conn, err := vsock.Dial(parentCID, hostIpProviderPort, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to connect to host ip provider: %w", err)
 	}
-	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "10")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	body, err := io.ReadAll(newLimitReader(resp.Body, maxTokenLen))
-	if err != nil {
-		return "", err
-	}
-	token := string(body)
+	defer conn.Close()
 
-	// Having obtained the session token, we can now make the actual metadata
-	// request.
-	req, err = http.NewRequest(http.MethodGet, metadataSvcInfo, nil)
+	_ = conn.SetDeadline(time.Now().Add(maxHostnameReqSeconds * time.Second))
+
+	data, err := io.ReadAll(newLimitReader(conn, maxIPResponseSize))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to read from host ip provider: %w", err)
 	}
-	req.Header.Set("X-aws-ec2-metadata-token", token)
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
+
+	hostname := strings.TrimSpace(string(data))
+
+	if hostname == "" {
+		return "", fmt.Errorf("received empty ip")
 	}
-	body, err = io.ReadAll(newLimitReader(resp.Body, maxHostnameLen))
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
+
+	return hostname, nil
 }
 
 func getNonceFromReq(r *http.Request) (nonce, error) {
@@ -256,4 +240,45 @@ func makeLeaderRequest(leader *url.URL, ourNonce nonce, areWeLeader chan bool, e
 		return
 	}
 	errChan <- fmt.Errorf("leader designation endpoint returned %d", resp.StatusCode)
+}
+
+func _getAppStateURL(appWebSrv *url.URL) string {
+	url := *appWebSrv
+	url.Path = pathState
+	return url.String()
+}
+
+func requestAndStoreKeyFromApp(appWebSrv *url.URL, keys *enclaveKeys) error {
+	resp, err := newUnauthenticatedHTTPClient().Get(_getAppStateURL(appWebSrv))
+	if err != nil {
+		return fmt.Errorf("failed to make get state request: %v", err)
+	}
+	if resp.StatusCode < 200 && resp.StatusCode >= 300 {
+		return fmt.Errorf("get state request returned %v", resp.StatusCode)
+	}
+	keyMaterial, err := io.ReadAll(newLimitReader(resp.Body, maxKeyMaterialSize))
+	if err != nil {
+		return fmt.Errorf("failed to read state body: %v", err)
+	}
+	keys.setAppKeys(keyMaterial)
+	return nil
+}
+
+func sendKeyToApp(appWebSrv *url.URL, keys *enclaveKeys) error {
+	keyMaterial := bytes.NewBuffer(keys.getAppKeys())
+	req, err := http.NewRequest(http.MethodPut, _getAppStateURL(appWebSrv), keyMaterial)
+	if err != nil {
+		return fmt.Errorf("failed to generate request to send key to app: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, err := newUnauthenticatedHTTPClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send key to app: %v", err)
+	}
+	if resp.StatusCode < 200 && resp.StatusCode >= 300 {
+		return fmt.Errorf("send key to app request returned %v", resp.StatusCode)
+	}
+	return nil
 }
