@@ -56,35 +56,6 @@ func rootHandler(cfg *Config) http.HandlerFunc {
 	}
 }
 
-// getStateHandler returns a handler that lets the enclave application retrieve
-// previously-set state.
-//
-// This is an enclave-internal endpoint that can only be accessed by the
-// trusted enclave application.
-func getStateHandler(getSyncState func() int, keys *enclaveKeys) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		switch getSyncState() {
-		case noSync:
-			http.Error(w, errKeySyncDisabled.Error(), http.StatusForbidden)
-		case isLeader:
-			http.Error(w, errEndpointGone.Error(), http.StatusGone)
-		case inProgress:
-			http.Error(w, errDesignationInProgress.Error(), http.StatusServiceUnavailable)
-		case isWorker:
-			w.Header().Set("Content-Type", "application/octet-stream")
-			appKeys := keys.getAppKeys()
-			n, err := w.Write(appKeys)
-			if err != nil {
-				elog.Fatalf("Error writing state to client: %v", err)
-			}
-			expected := len(appKeys)
-			if n != expected {
-				elog.Fatalf("Only wrote %d out of %d-byte state to client.", n, expected)
-			}
-		}
-	}
-}
-
 // putStateHandler returns a handler that lets the enclave application set
 // state that's synchronized with another enclave in case of horizontal
 // scaling.  The state can be arbitrary bytes.
