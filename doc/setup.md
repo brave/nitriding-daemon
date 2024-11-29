@@ -39,4 +39,4 @@ sudo systemctl enable nitro-enclaves-allocator.service
 sudo yum -y install golang
 ```
 
-For next steps go [here](/usage.md)
+For next steps go [here](./usage.md)
