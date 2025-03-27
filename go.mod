@@ -5,7 +5,7 @@ go 1.23.0
 toolchain go1.23.4
 
 require (
-	github.com/containers/gvisor-tap-vsock v0.8.1
+	github.com/containers/gvisor-tap-vsock v0.8.5
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/hf/nitrite v0.0.0-20241225144000-c2d5d3c4f303
 	github.com/hf/nsm v0.0.0-20220930140112-cd181bd646b9
@@ -14,8 +14,8 @@ require (
 	github.com/prometheus/client_golang v1.20.5
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
 	github.com/vishvananda/netlink v1.3.0
-	golang.org/x/crypto v0.35.0
-	golang.org/x/sys v0.30.0
+	golang.org/x/crypto v0.36.0
+	golang.org/x/sys v0.31.0
 )
 
 require (
@@ -35,7 +35,7 @@ require (
 	github.com/vishvananda/netns v0.0.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/net v0.36.0 // indirect
-	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )
