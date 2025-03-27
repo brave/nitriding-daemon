@@ -2,7 +2,7 @@ module github.com/brave/nitriding-daemon
 
 go 1.23.0
 
-toolchain go1.23.4
+toolchain go1.24.1
 
 require (
 	github.com/containers/gvisor-tap-vsock v0.8.1
