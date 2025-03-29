@@ -33,6 +33,7 @@ func TestSuccessfulRegisterWith(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}),
 	)
+	defer srv.Close()
 	leader, err := url.Parse(srv.URL)
 	if err != nil {
 		t.Fatalf("Error creating test server URL: %v", err)
@@ -55,11 +56,23 @@ func TestSuccessfulSync(t *testing.T) {
 	// the leader keys.
 	initLeaderKeysCert(t)
 
+	var mockAppRequests []mockAppRequestInfo
+	mockAppServer := createMockServer(nil, &mockAppRequests)
+	defer mockAppServer.Close()
+
 	// Set up the worker.
-	worker := createEnclave(&defaultCfg)
+	cfg := defaultCfg
+	appURL, err := url.Parse(mockAppServer.URL)
+	if err != nil {
+		t.Fatalf("Error creating mock app test server URL: %v", err)
+	}
+	cfg.AppWebSrv = appURL
+
+	worker := createEnclave(&cfg)
 	srv := httptest.NewTLSServer(
 		asWorker(worker.setupWorkerPostSync, &dummyAttester{}),
 	)
+	defer srv.Close()
 	workerURL, err := url.Parse(srv.URL)
 	if err != nil {
 		t.Fatalf("Error creating test server URL: %v", err)
@@ -68,6 +81,11 @@ func TestSuccessfulSync(t *testing.T) {
 	if err = asLeader(leaderKeys, &dummyAttester{}).syncWith(workerURL); err != nil {
 		t.Fatalf("Error syncing with leader: %v", err)
 	}
+
+	assertEqual(t, len(mockAppRequests), 1)
+	assertEqual(t, mockAppRequests[0].method, http.MethodPut)
+	assertEqual(t, mockAppRequests[0].path, "/enclave/state")
+	assertEqual(t, string(mockAppRequests[0].body), string(leaderKeys.AppKeys))
 
 	// Make sure that the keys were synced correctly.
 	if !worker.keys.equal(leaderKeys) {
