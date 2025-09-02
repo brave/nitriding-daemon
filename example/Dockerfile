@@ -1,6 +1,6 @@
 # A Go base image is enough to build nitriding reproducibly.
 # We use a specific instead of the latest image to ensure reproducibility.
-FROM golang:1.24.1 as builder
+FROM golang:1.25.0 as builder
 
 WORKDIR /
 
