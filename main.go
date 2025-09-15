@@ -34,14 +34,14 @@ func init() {
 
 func main() {
 	var fqdn, fqdnLeader, appURL, appWebSrv, appCmd, prometheusNamespace, mockCertFp string
-	var extPubPort, extPrivPort, intPort, hostProxyPort, prometheusPort uint
+	var extPubPort, extPrivPort, intPort, hostProxyPort, prometheusPort, hostIpProviderPort uint
 	var useACME, waitForApp, useProfiling, useVsockForExtPort, disableKeepAlives, debug bool
 	var err error
 
 	flag.StringVar(&fqdn, "fqdn", "",
 		"FQDN of the enclave application (e.g., \"example.com\").")
 	flag.StringVar(&fqdnLeader, "fqdn-leader", "",
-		"FQDN of the leader enclave (e.g., \"leader.example.com\").  Setting this enables key synchronization.")
+		"FQDN and port of the leader enclave (e.g., \"leader.example.com\").  Setting this enables key synchronization.")
 	flag.StringVar(&appURL, "appurl", "",
 		"Code repository of the enclave application (e.g., \"github.com/foo/bar\").")
 	flag.StringVar(&appWebSrv, "appwebsrv", "",
@@ -64,6 +64,8 @@ func main() {
 		"Port of proxy application running on EC2 host.")
 	flag.UintVar(&prometheusPort, "prometheus-port", 0,
 		"Port to expose Prometheus metrics at.")
+	flag.UintVar(&hostIpProviderPort, "host-ip-provider-port", 6161,
+		"Port of the host IP provider, provided by vsock-relay.")
 	flag.BoolVar(&useProfiling, "profile", false,
 		"Enable pprof profiling.  Only useful for debugging and must not be used in production.")
 	flag.BoolVar(&useACME, "acme", false,
@@ -94,9 +96,6 @@ func main() {
 	if prometheusPort > math.MaxUint16 {
 		elog.Fatalf("-prometheus-port must be in interval [1, %d]", math.MaxUint16)
 	}
-	if prometheusPort != 0 && prometheusNamespace == "" {
-		elog.Fatalf("-prometheus-namespace must be set when Prometheus is used.")
-	}
 
 	c := &Config{
 		FQDN:                fqdn,
@@ -108,6 +107,7 @@ func main() {
 		DisableKeepAlives:   disableKeepAlives,
 		PrometheusPort:      uint16(prometheusPort),
 		PrometheusNamespace: prometheusNamespace,
+		HostIpProviderPort:  uint32(hostIpProviderPort),
 		HostProxyPort:       uint32(hostProxyPort),
 		UseACME:             useACME,
 		WaitForApp:          waitForApp,

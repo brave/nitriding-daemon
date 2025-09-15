@@ -95,19 +95,20 @@ sequenceDiagram
   end
 
 leader->>leader: Generate HTTPS certificate
-leaderApp->>leaderApp: Generate key material
 
 Note over leader,worker: Enclaves designate the leader
 worker->>+leader: GET /enclave/leader (nonce_w)
 leader-->>-worker: OK
+
 worker->>worker: Did not call itself: worker
 leader->>leader: GET /enclave/leader (nonce_l)
 leader->>leader: Did call itself: leader
 
-Note over leaderApp,leader: Application sets its key material
-leaderApp->>+leader: PUT /enclave/state (key material)
+Note over leaderApp,leader: Enclave prompts key generation
+
+leader->>+leaderApp: GET /enclave/state
+leaderApp-->>-leader: OK
 leader->>leader: Save key material
-leader-->>-leaderApp: OK
 
 Note over leader,worker: Worker announces itself to leader
 worker->>+leader: POST /enclave/heartbeat
@@ -127,10 +128,9 @@ worker-->>-leader: OK
 
 worker->>worker: Install HTTPS certificate
 
-Note over worker,workerApp: Application retrieves key material
-workerApp->>+worker: GET /enclave/state
-worker->>worker: Retrieve key material
-worker-->>-workerApp: OK (key material)
+Note over worker,workerApp: Enclave sends key material to app
+worker->>+workerApp: PUT /enclave/state
+workerApp-->>-worker: OK
 workerApp->>workerApp: Install key material
 
 Note over leader, worker: Worker starts heartbeat loop
@@ -141,6 +141,7 @@ loop Heartbeat
 end
 
 Note over leaderApp: Application updates its key material
+
 leaderApp->>+leader: PUT /enclave/state (key material)
 leader->>leader: Save key material
 leader-->>-leaderApp: OK
