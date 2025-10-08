@@ -10,7 +10,7 @@ image_eif="$1"
 # gvproxy is the untrusted proxy application that runs on the EC2 host.  It
 # acts as the bridge between the Internet and the enclave.  The code is
 # available here:
-# https://github.com/brave-intl/bat-go/tree/master/nitro-shim/tools/gvproxy
+# https://github.com/containers/gvisor-tap-vsock/tree/main/cmd/gvproxy
 echo "[ec2] Starting gvproxy."
 sudo gvproxy -listen vsock://:1024 &
 pid="$!"
