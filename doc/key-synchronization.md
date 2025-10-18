@@ -22,11 +22,16 @@ themselves with the leader, which triggers key synchronization.
 
 To set up key synchronization, several steps are necessary:
 
+* Provide EC2 [IMDSv2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html) 
+  access to enclave via `gvproxy` `-ec2-metadata-access` flag. 
+  `gvproxy` version >=[v0.8.7](https://github.com/containers/gvisor-tap-vsock/tree/v0.8.7) required.
 * Use the `-fqdn-leader` command line flag on both the leader and the worker.
   Note that the leader and worker images _must be identical_.  The leader is
   only willing to synchronize key material with _identical enclaves_.
-* Practically speaking, the leader is meant to run in a separate k8s deployment
-  from the workers.
+* Use `-ext-priv-port` flag to specify external private port for secure enclave to enclave
+  communication and make it accessible via gvproxy port forwarding.
+* Practically speaking, the leader is meant to run in a separate k8s deployment/auto scaling 
+  group (ASG) from the workers.
 
 ## Protocol
 
