@@ -7,6 +7,13 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
 
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  issues: write
+  pull-requests: write
+
 jobs:
   security:
     name: security
