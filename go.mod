@@ -3,7 +3,7 @@ module github.com/brave/nitriding-daemon
 go 1.24.0
 
 require (
-	github.com/containers/gvisor-tap-vsock v0.8.1
+	github.com/containers/gvisor-tap-vsock v0.8.7
 	github.com/go-chi/chi/v5 v5.2.2
 	github.com/hf/nitrite v0.0.0-20241225144000-c2d5d3c4f303
 	github.com/hf/nsm v0.0.0-20220930140112-cd181bd646b9
@@ -11,7 +11,7 @@ require (
 	github.com/milosgajdos/tenus v0.0.3
 	github.com/prometheus/client_golang v1.20.5
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
-	github.com/vishvananda/netlink v1.3.0
+	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/crypto v0.45.0
 	golang.org/x/sys v0.38.0
 )
@@ -30,7 +30,7 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
-	github.com/vishvananda/netns v0.0.4 // indirect
+	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sync v0.18.0 // indirect
