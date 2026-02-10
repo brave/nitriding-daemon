@@ -10,32 +10,48 @@ import (
 )
 
 func TestArePCRsIdentical(t *testing.T) {
-	pcr1 := map[uint][]byte{
-		1: []byte("foobar"),
+	// Helper to create a PCR map with all identity PCRs set to the same value.
+	makePCRs := func(val []byte) map[uint][]byte {
+		m := make(map[uint][]byte)
+		for _, pcr := range identityPCRs {
+			m[pcr] = append([]byte{}, val...)
+		}
+		return m
 	}
-	pcr2 := map[uint][]byte{
-		1: []byte("foobar"),
-	}
+
+	pcr1 := makePCRs([]byte("foobar"))
+	pcr2 := makePCRs([]byte("foobar"))
 	if !arePCRsIdentical(pcr1, pcr2) {
 		t.Fatal("Failed to recognize identical PCRs as such.")
 	}
 
-	// PCR4 should be ignored.
-	pcr1[4], pcr2[4] = []byte("foo"), []byte("bar")
+	// All non-identity PCRs (0–31) should be ignored, even when they differ
+	// between the two maps.
+	isIdentityPCR := make(map[uint]bool)
+	for _, pcr := range identityPCRs {
+		isIdentityPCR[pcr] = true
+	}
+	for i := uint(0); i < 32; i++ {
+		if isIdentityPCR[i] {
+			continue
+		}
+		pcr1[i] = []byte("foo")
+		pcr2[i] = []byte("bar")
+	}
 	if !arePCRsIdentical(pcr1, pcr2) {
-		t.Fatal("Failed to recognize identical PCRs as such.")
+		t.Fatal("Non-identity PCRs should be ignored.")
 	}
 
-	// Add a new PCR value, so our two maps are no longer identical.
-	pcr1[2] = []byte("barfoo")
+	// Changing an identity PCR should cause a mismatch.
+	pcr1[2] = []byte("different")
 	if arePCRsIdentical(pcr1, pcr2) {
 		t.Fatal("Failed to recognize different PCRs as such.")
 	}
 
-	// Add the same PCR ID but with a different value.
-	pcr2[2] = []byte("foobar")
+	// A missing identity PCR in one map should cause a mismatch.
+	delete(pcr1, 2)
 	if arePCRsIdentical(pcr1, pcr2) {
-		t.Fatal("Failed to recognize different PCRs as such.")
+		t.Fatal("Failed to recognize missing PCR as mismatch.")
 	}
 }
 

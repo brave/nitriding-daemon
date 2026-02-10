@@ -27,6 +27,18 @@ var (
 	// values.  Using a variable allows us to easily mock the function in our
 	// unit tests.
 	getPCRValues = func() (map[uint][]byte, error) { return _getPCRValues() }
+
+	// identityPCRs contains the PCR indices that AWS Nitro Enclaves populates:
+	// https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html
+	//   - PCR0: Enclave image file
+	//   - PCR1: Linux kernel and bootstrap
+	//   - PCR2: Application
+	//   - PCR3: IAM role assigned to the parent instance
+	//   - PCR8: Enclave image file signing certificate
+	//
+	// PCR4 (parent instance ID) is excluded because enclaves run on different
+	// parent instances during horizontal scaling.
+	identityPCRs = [...]uint{0, 1, 2, 3, 8}
 )
 
 // AttestationHashes contains hashes over public key material which we embed in
@@ -62,22 +74,13 @@ func _getPCRValues() (map[uint][]byte, error) {
 	return res.Document.PCRs, nil
 }
 
-// arePCRsIdentical returns true if (and only if) the two given PCR maps are
-// identical.
+// arePCRsIdentical returns true if (and only if) the two given PCR maps
+// contain identical values for the Nitro Enclave-populated PCRs.
 func arePCRsIdentical(ourPCRs, theirPCRs map[uint][]byte) bool {
-	if len(ourPCRs) != len(theirPCRs) {
-		return false
-	}
-
-	for pcr, ourValue := range ourPCRs {
-		// PCR4 contains a hash over the parent's instance ID.  Our enclaves run
-		// on different parent instances; PCR4 will therefore always differ:
-		// https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html
-		if pcr == 4 {
-			continue
-		}
-		theirValue, exists := theirPCRs[pcr]
-		if !exists {
+	for _, pcr := range identityPCRs {
+		ourValue, ourExists := ourPCRs[pcr]
+		theirValue, theirExists := theirPCRs[pcr]
+		if ourExists != theirExists {
 			return false
 		}
 		if !bytes.Equal(ourValue, theirValue) {
