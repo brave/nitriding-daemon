@@ -1,3 +1,9 @@
+## Archived
+
+This repository is no longer being maintained and it's recommended that developers look at [Veil](https://github.com/Amnesic-Systems/veil) instead.
+
+---
+
 <div align="center">
   <img src="./doc/nitriding-logo.svg" alt="Nitriding logo" width="250">
 </div>
