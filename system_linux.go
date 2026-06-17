@@ -77,21 +77,31 @@ func configureTapIface() error {
 	return nil
 }
 
-// writeResolvconf creates our resolv.conf and adds a nameserver.
-func writeResolvconf() error {
+// resolvconfDir is the directory holding the enclave's resolv.conf.  It is a
+// var so tests can override it.
+var resolvconfDir = "/run/resolvconf/"
+
+// writeResolvconf creates our resolv.conf and adds a nameserver.  When
+// configured, it also writes "search" and "options ndots:N" lines.
+func writeResolvconf(c *Config) error {
 	// A Nitro Enclave's /etc/resolv.conf is a symlink to
 	// /run/resolvconf/resolv.conf.  As of 2022-11-21, the /run/ directory
 	// exists but not its resolvconf/ subdirectory.
-	dir := "/run/resolvconf/"
-	file := dir + "resolv.conf"
-
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(resolvconfDir, 0755); err != nil {
 		return fmt.Errorf("failed to create directories: %w", err)
 	}
 
 	// Our default gateway -- gvproxy -- also operates a DNS resolver.
-	c := fmt.Sprintf("nameserver %s\n", defaultGw)
-	if err := os.WriteFile(file, []byte(c), 0644); err != nil {
+	out := fmt.Sprintf("nameserver %s\n", defaultGw)
+	if c.ResolvSearch != "" {
+		out += fmt.Sprintf("search %s\n", c.ResolvSearch)
+	}
+	if c.ResolvNdots > 0 {
+		out += fmt.Sprintf("options ndots:%d\n", c.ResolvNdots)
+	}
+
+	file := resolvconfDir + "resolv.conf"
+	if err := os.WriteFile(file, []byte(out), 0644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 

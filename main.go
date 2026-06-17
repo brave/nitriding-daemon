@@ -33,8 +33,8 @@ func init() {
 }
 
 func main() {
-	var fqdn, fqdnLeader, appURL, appWebSrv, appCmd, prometheusNamespace, mockCertFp string
-	var extPubPort, extPrivPort, intPort, hostProxyPort, prometheusPort uint
+	var fqdn, fqdnLeader, appURL, appWebSrv, appCmd, prometheusNamespace, mockCertFp, resolvSearch string
+	var extPubPort, extPrivPort, intPort, hostProxyPort, prometheusPort, resolvNdots uint
 	var useACME, waitForApp, useProfiling, useVsockForExtPort, disableKeepAlives, debug bool
 	var err error
 
@@ -74,6 +74,10 @@ func main() {
 		"Print extra debug messages and use dummy attester for testing outside enclaves.")
 	flag.StringVar(&mockCertFp, "mock-cert-fp", "",
 		"Mock certificate fingerprint to use in attestation documents (hexadecimal)")
+	flag.StringVar(&resolvSearch, "resolv-search", "",
+		"Space-separated DNS search domains to write to the enclave's resolv.conf (e.g., \"foo.internal bar.internal\").")
+	flag.UintVar(&resolvNdots, "resolv-ndots", 0,
+		"Value for the resolv.conf \"options ndots:N\" line.  If 0, no options line is written.")
 	flag.Parse()
 
 	if fqdn == "" {
@@ -97,6 +101,9 @@ func main() {
 	if prometheusPort != 0 && prometheusNamespace == "" {
 		elog.Fatalf("-prometheus-namespace must be set when Prometheus is used.")
 	}
+	if resolvNdots > 15 {
+		elog.Fatalf("-resolv-ndots must be in interval [0, 15].")
+	}
 
 	c := &Config{
 		FQDN:                fqdn,
@@ -114,6 +121,8 @@ func main() {
 		UseProfiling:        useProfiling,
 		MockCertFp:          mockCertFp,
 		Debug:               debug,
+		ResolvSearch:        resolvSearch,
+		ResolvNdots:         uint8(resolvNdots),
 	}
 	if appURL != "" {
 		u, err := url.Parse(appURL)

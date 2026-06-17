@@ -185,6 +185,15 @@ type Config struct {
 	// MockCertFp specifies a mock TLS certificate fingerprint
 	// to use in attestation documents.
 	MockCertFp string
+
+	// ResolvSearch is the space-separated list of DNS search domains written
+	// to the enclave's resolv.conf "search" line.  If empty, no search line
+	// is emitted.
+	ResolvSearch string
+
+	// ResolvNdots is the value written to the enclave's resolv.conf
+	// "options ndots:N" line.  If zero, no options line is emitted.
+	ResolvNdots uint8
 }
 
 // Validate returns an error if required fields in the config are not set.

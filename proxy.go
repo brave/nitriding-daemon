@@ -75,7 +75,7 @@ func setupNetworking(c *Config, stop chan struct{}) error {
 	if err = configureTapIface(); err != nil {
 		return fmt.Errorf("failed to configure tap interface: %w", err)
 	}
-	if err = writeResolvconf(); err != nil {
+	if err = writeResolvconf(c); err != nil {
 		return fmt.Errorf("failed to create resolv.conf: %w", err)
 	}
 

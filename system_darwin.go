@@ -8,5 +8,5 @@ var ourWaterParams = water.PlatformSpecificParams{Name: ifaceTap}
 // functions, we can at least get it to compile.
 func configureLoIface() error  { return nil }
 func configureTapIface() error { return nil }
-func writeResolvconf() error   { return nil }
+func writeResolvconf(_ *Config) error { return nil }
 func maybeSeedEntropy()        {}
