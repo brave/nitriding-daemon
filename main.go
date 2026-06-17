@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 var (
@@ -174,18 +175,31 @@ func runAppCommand(appCmd string, stdoutFunc, stderrFunc func(string)) {
 	if err != nil {
 		elog.Fatalf("Failed to obtain stderr pipe for enclave application: %v", err)
 	}
-	go forwardOutput(stderr, stderrFunc, "stderr")
 
 	// Print the enclave application's stdout.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		elog.Fatalf("Failed to obtain stdout pipe for enclave application: %v", err)
 	}
-	go forwardOutput(stdout, stdoutFunc, "stdout")
+
+	// Wait for the output goroutines to drain before calling cmd.Wait, which
+	// closes the pipes. Otherwise, fast-exiting applications can lose output.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		forwardOutput(stderr, stderrFunc, "stderr")
+	}()
+	go func() {
+		defer wg.Done()
+		forwardOutput(stdout, stdoutFunc, "stdout")
+	}()
 
 	if err := cmd.Start(); err != nil {
 		elog.Fatalf("Failed to start enclave application: %v", err)
 	}
+
+	wg.Wait()
 
 	if err := cmd.Wait(); err != nil {
 		elog.Fatalf("Enclave application exited with non-0 exit code: %v", err)
