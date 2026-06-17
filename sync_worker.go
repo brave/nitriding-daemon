@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/nacl/box"
@@ -19,16 +20,24 @@ var (
 	errInProgress      = errors.New("key sync already in progress")
 	errFailedToDecrypt = errors.New("error decrypting enclave keys")
 	errHashNotInAttstn = errors.New("hash of encrypted keys not in attestation document")
+
+	maxInterimStateAgeSeconds = 10.0
 )
+
+type interimSyncState struct {
+	ephemeralKey *boxKey
+	nonce        nonce
+	startTime    time.Time
+}
 
 // workerSync holds the state and code that we need for a one-off sync with a
 // leader enclave.  workerSync implements the http.Handler interface because the
 // sync protocol requires two endpoints on the worker.
 type workerSync struct {
 	attester
-	setupWorker   func(*enclaveKeys) error
-	ephemeralKeys chan *boxKey
-	nonce         chan nonce
+	setupWorker       func(*enclaveKeys) error
+	interimStateMutex sync.Mutex
+	interimState      *interimSyncState
 }
 
 // asWorker returns a new workerSync object.
@@ -37,10 +46,8 @@ func asWorker(
 	a attester,
 ) *workerSync {
 	return &workerSync{
-		attester:      a,
-		setupWorker:   setupWorker,
-		nonce:         make(chan nonce, 1),
-		ephemeralKeys: make(chan *boxKey, 1),
+		attester:    a,
+		setupWorker: setupWorker,
 	}
 }
 
@@ -104,10 +111,13 @@ func (s *workerSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *workerSync) initSync(w http.ResponseWriter, r *http.Request) {
 	elog.Println("Received leader's request to initiate key sync.")
 
+	s.interimStateMutex.Lock()
+	defer s.interimStateMutex.Unlock()
 	// There must not be more than one key synchronization attempt at any given
 	// time.  Abort if we get another request while key synchronization is still
 	// in progress.
-	if len(s.ephemeralKeys) > 0 {
+	if s.interimState != nil &&
+		time.Since(s.interimState.startTime).Seconds() < maxInterimStateAgeSeconds {
 		http.Error(w, errInProgress.Error(), http.StatusTooManyRequests)
 		return
 	}
@@ -117,6 +127,7 @@ func (s *workerSync) initSync(w http.ResponseWriter, r *http.Request) {
 	leadersNonce, err := getNonceFromReq(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	// Create the worker's nonce and store it in our channel, so we can later
@@ -126,7 +137,6 @@ func (s *workerSync) initSync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.nonce <- workersNonce
 
 	// Create an ephemeral key that the leader is going to use to encrypt
 	// its enclave keys.
@@ -135,7 +145,11 @@ func (s *workerSync) initSync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.ephemeralKeys <- boxKey
+	s.interimState = &interimSyncState{
+		ephemeralKey: boxKey,
+		nonce:        workersNonce,
+		startTime:    time.Now(),
+	}
 
 	// Create and return the worker's Base64-encoded attestation document.
 	attstnDoc, err := s.createAttstn(&workerAuxInfo{
@@ -183,8 +197,16 @@ func (s *workerSync) finishSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.interimStateMutex.Lock()
+	defer s.interimStateMutex.Unlock()
+
+	if s.interimState == nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// Verify attestation document and obtain its auxiliary information.
-	aux, err := s.verifyAttstn(attstnDoc, <-s.nonce)
+	aux, err := s.verifyAttstn(attstnDoc, s.interimState.nonce)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -204,7 +226,8 @@ func (s *workerSync) finishSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ephemeralKey := <-s.ephemeralKeys
+	ephemeralKey := s.interimState.ephemeralKey
+	s.interimState = nil
 	// Decrypt the leader's enclave keys, which are encrypted with the
 	// public key that we provided earlier.
 	decrypted, ok := box.OpenAnonymous(

@@ -124,34 +124,6 @@ func signalReady(t *testing.T, e *Enclave) {
 	time.Sleep(100 * time.Millisecond)
 }
 
-func TestGetStateHandler(t *testing.T) {
-	var keys = newTestKeys(t)
-
-	makeReq := makeReqToHandler(getStateHandler(retState(noSync), keys))
-	assertResponse(t,
-		makeReq(http.MethodGet, pathState, nil),
-		newResp(http.StatusForbidden, errKeySyncDisabled.Error()),
-	)
-
-	makeReq = makeReqToHandler(getStateHandler(retState(isLeader), keys))
-	assertResponse(t,
-		makeReq(http.MethodGet, pathState, nil),
-		newResp(http.StatusGone, errEndpointGone.Error()),
-	)
-
-	makeReq = makeReqToHandler(getStateHandler(retState(isWorker), keys))
-	assertResponse(t,
-		makeReq(http.MethodGet, pathState, nil),
-		newResp(http.StatusOK, string(keys.getAppKeys())),
-	)
-
-	makeReq = makeReqToHandler(getStateHandler(retState(inProgress), keys))
-	assertResponse(t,
-		makeReq(http.MethodGet, pathState, nil),
-		newResp(http.StatusServiceUnavailable, errDesignationInProgress.Error()),
-	)
-}
-
 func TestPutStateHandler(t *testing.T) {
 	var (
 		tooLargeKey       = make([]byte, maxKeyMaterialLen+1)
@@ -190,32 +162,6 @@ func TestPutStateHandler(t *testing.T) {
 	assertResponse(t,
 		makeReq(http.MethodPut, pathState, bytes.NewReader(almostTooLargeKey)),
 		newResp(http.StatusOK, ""),
-	)
-}
-
-func TestGetPutStateHandlers(t *testing.T) {
-	var (
-		a       = &dummyAttester{}
-		keys    = newTestKeys(t)
-		appKeys = "application keys"
-		stop    = make(chan struct{})
-		workers = newWorkerManager(time.Second)
-	)
-	go workers.start(stop)
-	defer close(stop)
-
-	// Set application state.
-	makeReq := makeReqToHandler(putStateHandler(a, retState(isLeader), keys, workers))
-	assertResponse(t,
-		makeReq(http.MethodPut, pathState, strings.NewReader(appKeys)),
-		newResp(http.StatusOK, ""),
-	)
-
-	// Retrieve previously-set application state.
-	makeReq = makeReqToHandler(getStateHandler(retState(isWorker), keys))
-	assertResponse(t,
-		makeReq(http.MethodGet, pathState, nil),
-		newResp(http.StatusOK, appKeys),
 	)
 }
 

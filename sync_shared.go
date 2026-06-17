@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	maxAttstnBodyLen = 1 << 14 // Upper limit for attestation body length.
-	boxKeyLen        = 32      // NaCl box's private and public key length.
+	maxAttstnBodyLen = 256 * 1024 // Upper limit for attestation body length.
+	boxKeyLen        = 32         // NaCl box's private and public key length.
 )
 
 var (

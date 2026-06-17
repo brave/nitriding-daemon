@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
@@ -10,10 +11,10 @@ import (
 )
 
 const (
-	reqPath    = "http_req_path"
-	reqMethod  = "http_req_method"
-	respStatus = "http_resp_status"
-	respErr    = "http_resp_error"
+	reqPath    = "path"
+	reqMethod  = "method"
+	respStatus = "status"
+	respErr    = "error"
 
 	notAvailable = "n/a"
 )
@@ -31,20 +32,29 @@ var (
 
 // metrics contains our Prometheus metrics.
 type metrics struct {
-	reqs        *prometheus.CounterVec
-	proxiedReqs *prometheus.CounterVec
-	heartbeats  *prometheus.CounterVec
+	reqs         *prometheus.CounterVec
+	proxiedReqs  *prometheus.CounterVec
+	heartbeats   *prometheus.CounterVec
+	reqDurations *prometheus.HistogramVec
 }
 
 // newMetrics initializes our Prometheus metrics.
 func newMetrics(reg prometheus.Registerer, namespace string) *metrics {
-	elog.Printf("Initializing Prometheus metrics for %q.", namespace)
+	elog.Printf("Initializing Prometheus metrics. namespace = %q", namespace)
 	m := &metrics{
 		reqs: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Name:      "requests",
 				Help:      "HTTP requests to nitriding",
+			},
+			[]string{reqPath, reqMethod, respStatus, respErr},
+		),
+		reqDurations: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: namespace,
+				Name:      "request_duration_seconds",
+				Help:      "Duration of proxied HTTP requests",
 			},
 			[]string{reqPath, reqMethod, respStatus, respErr},
 		),
@@ -68,6 +78,7 @@ func newMetrics(reg prometheus.Registerer, namespace string) *metrics {
 	reg.MustRegister(m.proxiedReqs)
 	reg.MustRegister(m.reqs)
 	reg.MustRegister(m.heartbeats)
+	reg.MustRegister(m.reqDurations)
 
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
 		Namespace: namespace,
@@ -109,14 +120,19 @@ func (m *metrics) checkRevProxyErr(w http.ResponseWriter, r *http.Request, err e
 // our Prometheus metrics.
 func (m *metrics) middleware(h http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
+		startTime := time.Now()
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		h.ServeHTTP(ww, r)
-		m.reqs.With(prometheus.Labels{
-			reqPath:    r.URL.Path,
-			reqMethod:  r.Method,
-			respStatus: fmt.Sprint(ww.Status()),
-			respErr:    notAvailable,
-		}).Inc()
+		if ww.Status() != http.StatusNotFound {
+			labels := prometheus.Labels{
+				reqPath:    r.URL.Path,
+				reqMethod:  r.Method,
+				respStatus: fmt.Sprint(ww.Status()),
+				respErr:    notAvailable,
+			}
+			m.reqs.With(labels).Inc()
+			m.reqDurations.With(labels).Observe(time.Since(startTime).Seconds())
+		}
 	}
 	return http.HandlerFunc(f)
 }
